@@ -1,0 +1,162 @@
+{
+  "name": "timetracker-desktop",
+  "version": "1.0.0",
+  "description": "TimeTracker Desktop Companion - System-wide activity tracking",
+  "main": "main.js",
+  "author": {
+    "name": "TimeTracker",
+    "email": "support@timetracker.app"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/timetracker/timetracker-desktop",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/timetracker/timetracker-desktop.git"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --enable-logging",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win --publish always",
+    "build:mac": "electron-builder --mac --publish always",
+    "build:linux": "electron-builder --linux --publish always",
+    "build:all": "electron-builder -mwl --publish always",
+    "release": "electron-builder --publish always",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "active-win": "^8.1.0",
+    "electron-store": "^8.1.0",
+    "electron-updater": "^6.1.7",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "electron-notarize": "^1.2.2"
+  },
+  "build": {
+    "appId": "com.timetracker.desktop",
+    "productName": "TimeTracker Desktop",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "copyright": "Copyright © 2024 TimeTracker",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "**/*",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!**/node_modules/*.d.ts",
+      "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
+      "!.editorconfig",
+      "!**/._*",
+      "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
+      "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
+      "!**/{appveyor.yml,.travis.yml,circle.yml}",
+      "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "timetracker",
+      "repo": "timetracker-desktop",
+      "releaseType": "release"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64", "ia32"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "publisherName": "TimeTracker",
+      "verifyUpdateCodeSignature": true,
+      "signAndEditExecutable": true,
+      "certificateSubjectName": "TimeTracker",
+      "certificateSha1": "",
+      "rfc3161TimeStampServer": "http://timestamp.digicert.com"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        },
+        {
+          "target": "zip",
+          "arch": ["universal"]
+        }
+      ],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "notarize": {
+        "teamId": "${env.APPLE_TEAM_ID}"
+      }
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        },
+        {
+          "target": "rpm",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icons",
+      "category": "Office",
+      "maintainer": "TimeTracker <support@timetracker.app>",
+      "vendor": "TimeTracker",
+      "synopsis": "System-wide time tracking",
+      "description": "Track time across all applications with automatic idle detection and cloud sync"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "TimeTracker Desktop",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico",
+      "license": "LICENSE.txt",
+      "deleteAppDataOnUninstall": false
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
+    "appImage": {
+      "license": "LICENSE.txt"
+    }
+  }
+}

@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
+  <title>TimeTracker Desktop</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg-primary: #0f172a;
+      --bg-secondary: #1e293b;
+      --bg-tertiary: #334155;
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --error: #ef4444;
+      --border: #334155;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Custom Title Bar */
+    .titlebar {
+      height: 32px;
+      background: var(--bg-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 8px;
+      -webkit-app-region: drag;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .titlebar-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .titlebar-title svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .titlebar-controls {
+      display: flex;
+      -webkit-app-region: no-drag;
+    }
+
+    .titlebar-btn {
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .titlebar-btn:hover {
+      background: var(--bg-tertiary);
+    }
+
+    .titlebar-btn.close:hover {
+      background: var(--error);
+      color: white;
+    }
+
+    .titlebar-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    /* Main Content */
+    .app-container {
+      height: calc(100vh - 32px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    .header {
+      padding: 16px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .status-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-indicator {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-tertiary);
+    }
+
+    .status-indicator.tracking {
+      background: rgba(34, 197, 94, 0.2);
+      animation: pulse 2s infinite;
+    }
+
+    .status-indicator.idle {
+      background: rgba(245, 158, 11, 0.2);
+    }
+
+    .status-indicator.paused {
+      background: rgba(100, 116, 139, 0.2);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    .status-indicator svg {
+      width: 24px;
+      height: 24px;
+    }
+
+    .status-indicator.tracking svg {
+      color: var(--success);
+    }
+
+    .status-indicator.idle svg {
+      color: var(--warning);
+    }
+
+    .status-indicator.paused svg {
+      color: var(--text-muted);
+    }
+
+    .status-info h2 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .status-info p {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .current-app {
+      margin-top: 12px;
+      padding: 12px;
+      background: var(--bg-tertiary);
+      border-radius: 8px;
+    }
+
+    .current-app-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .current-app-name {
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .current-app-title {
+      font-size: 11px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+
+    /* Navigation Tabs */
+    .nav-tabs {
+      display: flex;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-tab {
+      flex: 1;
+      padding: 12px;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s;
+      border-bottom: 2px solid transparent;
+    }
+
+    .nav-tab:hover {
+      color: var(--text-primary);
+      background: var(--bg-tertiary);
+    }
+
+    .nav-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .nav-tab svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    /* Content Area */
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    .content::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .content::-webkit-scrollbar-track {
+      background: var(--bg-primary);
+    }
+
+    .content::-webkit-scrollbar-thumb {
+      background: var(--bg-tertiary);
+      border-radius: 3px;
+    }
+
+    /* Activity List */
+    .activity-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .activity-item {
+      padding: 12px;
+      background: var(--bg-secondary);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .activity-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .activity-app {
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .activity-duration {
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .activity-title {
+      font-size: 11px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+    .activity-title {
+      font-size: 11px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .activity-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 6px;
+    }
+
+    .activity-time {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .activity-category {
+      font-size: 9px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+
+    /* Empty State */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-secondary);
+    }
+
+    .empty-state svg {
+      width: 48px;
+      height: 48px;
+      margin-bottom: 12px;
+      opacity: 0.5;
+    }
+
+    .empty-state h3 {
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+
+    .empty-state p {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* Settings */
+    .settings-section {
+      margin-bottom: 24px;
+    }
+
+    .settings-section h3 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .setting-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px;
+      background: var(--bg-secondary);
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+
+    .setting-label {
+      font-size: 13px;
+    }
+
+    .setting-description {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    /* Toggle Switch */
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      background: var(--bg-tertiary);
+      border-radius: 11px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .toggle.active {
+      background: var(--accent);
+    }
+
+    .toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 18px;
+      height: 18px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+
+    .toggle.active::after {
+      transform: translateX(18px);
+    }
+
+    /* Input */
+    .input-group {
+      margin-bottom: 12px;
+    }
+
+    .input-group label {
+      display: block;
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    .input-group input {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 13px;
+    }
+
+    .input-group input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      border: none;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-hover);
+    }
+
+    .btn-secondary {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+    }
+
+    .btn-secondary:hover {
+      background: var(--border);
+    }
+
+    .btn-block {
+      width: 100%;
+    }
+
+    /* Sync Status */
+    .sync-status {
+      padding: 12px;
+      background: var(--bg-secondary);
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    .sync-status-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .sync-status-title {
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .sync-badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 500;
+    }
+
+    .sync-badge.connected {
+      background: rgba(34, 197, 94, 0.2);
+      color: var(--success);
+    }
+
+    .sync-badge.disconnected {
+      background: rgba(239, 68, 68, 0.2);
+      color: var(--error);
+    }
+
+    .sync-info {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    /* Update Banner */
+    .update-banner {
+      padding: 12px;
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(139, 92, 246, 0.2));
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    .update-banner-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .update-banner-header svg {
+      width: 18px;
+      height: 18px;
+      color: var(--accent);
+    }
+
+    .update-banner-title {
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .update-banner-text {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+    }
+
+    .update-banner-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    /* Progress Bar */
+    .progress-bar {
+      height: 4px;
+      background: var(--bg-tertiary);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      transition: width 0.3s;
+    }
+
+    /* Version Info */
+    .version-info {
+      text-align: center;
+      padding: 16px;
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .version-info a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .version-info a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <!-- Custom Title Bar -->
+  <div class="titlebar">
+    <div class="titlebar-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+      </svg>
+      TimeTracker Desktop
+    </div>
+    <div class="titlebar-controls">
+      <button class="titlebar-btn" id="btn-minimize">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+      </button>
+      <button class="titlebar-btn close" id="btn-close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="app-container">
+    <!-- Header with Status -->
+    <div class="header">
+      <div class="status-card">
+        <div class="status-indicator tracking" id="status-indicator">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="status-icon">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </div>
+        <div class="status-info">
+          <h2 id="status-text">Tracking Active</h2>
+          <p id="status-time">Today: 0h 0m</p>
+        </div>
+      </div>
+      <div class="current-app" id="current-app">
+        <div class="current-app-label">Currently Tracking</div>
+        <div class="current-app-name" id="current-app-name">-</div>
+        <div class="current-app-title" id="current-app-title">No activity detected</div>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-tab="activities">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
+        </svg>
+        Activities
+      </button>
+      <button class="nav-tab" data-tab="sync">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+          <polyline points="21 3 21 9 15 9"/>
+        </svg>
+        Sync
+      </button>
+      <button class="nav-tab" data-tab="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Settings
+      </button>
+    </div>
+
+    <!-- Content Area -->
+    <div class="content">
+      <!-- Activities Tab -->
+      <div class="tab-content" id="tab-activities">
+        <div class="activity-list" id="activity-list">
+          <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <h3>No activities yet</h3>
+            <p>Activities will appear here as you work</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sync Tab -->
+      <div class="tab-content" id="tab-sync" style="display: none;">
+        <div class="sync-status">
+          <div class="sync-status-header">
+            <span class="sync-status-title">Sync Status</span>
+            <span class="sync-badge disconnected" id="sync-badge">Not Connected</span>
+          </div>
+          <div class="sync-info" id="sync-info">
+            Configure sync to connect with the web app
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Connection Settings</h3>
+          <div class="input-group">
+            <label>Web App URL</label>
+            <input type="url" id="sync-url" placeholder="https://your-timetracker-app.com">
+          </div>
+          <div class="input-group">
+            <label>Sync Token</label>
+            <input type="password" id="sync-token" placeholder="Paste your sync token here">
+          </div>
+          <button class="btn btn-primary btn-block" id="btn-save-sync">Save & Connect</button>
+        </div>
+
+        <button class="btn btn-secondary btn-block" id="btn-sync-now">
+          Sync Now
+        </button>
+      </div>
+
+      <!-- Settings Tab -->
+      <div class="tab-content" id="tab-settings" style="display: none;">
+        <!-- Update Banner -->
+        <div class="update-banner" id="update-banner" style="display: none;">
+          <div class="update-banner-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span class="update-banner-title" id="update-title">Update Available</span>
+          </div>
+          <p class="update-banner-text" id="update-text">A new version is available</p>
+          <div class="progress-bar" id="update-progress" style="display: none;">
+            <div class="progress-bar-fill" id="update-progress-fill" style="width: 0%"></div>
+          </div>
+          <div class="update-banner-actions" id="update-actions">
+            <button class="btn btn-primary" id="btn-download-update">Download</button>
+            <button class="btn btn-secondary" id="btn-skip-update">Later</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Tracking</h3>
+          <div class="setting-item">
+            <div>
+              <div class="setting-label">Enable Tracking</div>
+              <div class="setting-description">Track active windows and applications</div>
+            </div>
+            <div class="toggle active" id="toggle-tracking"></div>
+          </div>
+          <div class="setting-item">
+            <div>
+              <div class="setting-label">Idle Threshold</div>
+              <div class="setting-description">Minutes before marking as idle</div>
+            </div>
+            <input type="number" id="idle-threshold" value="5" min="1" max="60" style="width: 60px; text-align: center;">
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Application</h3>
+          <div class="setting-item">
+            <div>
+              <div class="setting-label">Start on Boot</div>
+              <div class="setting-description">Launch TimeTracker when you log in</div>
+            </div>
+            <div class="toggle active" id="toggle-startup"></div>
+          </div>
+          <div class="setting-item">
+            <div>
+              <div class="setting-label">Minimize to Tray</div>
+              <div class="setting-description">Keep running in system tray when closed</div>
+            </div>
+            <div class="toggle active" id="toggle-tray"></div>
+          </div>
+          <div class="setting-item">
+            <div>
+              <div class="setting-label">Auto-Update</div>
+              <div class="setting-description">Automatically check for updates</div>
+            </div>
+            <div class="toggle active" id="toggle-autoupdate"></div>
+          </div>
+        </div>
+
+        <button class="btn btn-secondary btn-block" id="btn-check-updates">
+          Check for Updates
+        </button>
+
+        <div class="version-info">
+          <p>TimeTracker Desktop v<span id="app-version">1.0.0</span></p>
+          <p><a href="#" id="link-releases">View Release Notes</a></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
