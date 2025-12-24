@@ -1,8 +1,9 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Activity, Project } from '@/types';
 import { formatDuration, secondsToHours } from '@/utils/timeUtils';
 import StatCard from './StatCard';
 import ActivityItem from './ActivityItem';
+import EditActivityModal from './EditActivityModal';
 import { 
   ClockIcon, 
   CheckIcon, 
@@ -26,6 +27,8 @@ interface DashboardViewProps {
   onCode: (activityId: string, projectId: string, taskId: string) => void;
   onUncode: (activityId: string) => void;
   onDelete?: (activityId: string) => void;
+  onUpdate?: (activityId: string, updates: Partial<Activity>) => void;
+  onSplit?: (originalActivityId: string, newActivities: Omit<Activity, 'id'>[]) => void;
   todayActivities: Activity[];
 }
 
@@ -36,8 +39,12 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   onCode,
   onUncode,
   onDelete,
+  onUpdate,
+  onSplit,
   todayActivities
 }) => {
+  const [editingActivity, setEditingActivity] = useState<Activity | null>(null);
+
   // Calculate project breakdown for today
   const projectBreakdown = useMemo(() => {
     const breakdown: Record<string, number> = {};
@@ -58,6 +65,22 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   const codingRate = stats.todayTotal > 0 
     ? Math.round((stats.todayCoded / stats.todayTotal) * 100) 
     : 0;
+
+  const handleEditActivity = (activity: Activity) => {
+    setEditingActivity(activity);
+  };
+
+  const handleSaveEdit = (activityId: string, updates: Partial<Activity>) => {
+    if (onUpdate) {
+      onUpdate(activityId, updates);
+    }
+  };
+
+  const handleSplitActivity = (originalActivityId: string, newActivities: Omit<Activity, 'id'>[]) => {
+    if (onSplit) {
+      onSplit(originalActivityId, newActivities);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -159,6 +182,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                   onCode={onCode}
                   onUncode={onUncode}
                   onDelete={onDelete}
+                  onEdit={onUpdate ? handleEditActivity : undefined}
                 />
               ))
             )}
@@ -218,6 +242,18 @@ const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Edit Activity Modal */}
+      {editingActivity && (
+        <EditActivityModal
+          activity={editingActivity}
+          projects={projects}
+          isOpen={!!editingActivity}
+          onClose={() => setEditingActivity(null)}
+          onSave={handleSaveEdit}
+          onSplit={handleSplitActivity}
+        />
+      )}
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Activity, Project, Task } from '@/types';
 import { formatDuration, formatTime } from '@/utils/timeUtils';
-import { getAppIcon, CheckIcon, XIcon, ChevronDownIcon, TrashIcon } from '@/components/ui/Icons';
+import { getAppIcon, CheckIcon, XIcon, ChevronDownIcon, TrashIcon, EditIcon } from '@/components/ui/Icons';
 import { getCategorizationEngine } from '@/utils/categorization';
 import { useCategorySync } from '@/hooks/useCategorySync';
 
@@ -11,6 +11,7 @@ interface ActivityItemProps {
   onCode: (activityId: string, projectId: string, taskId: string) => void;
   onUncode: (activityId: string) => void;
   onDelete?: (activityId: string) => void;
+  onEdit?: (activity: Activity) => void;
   isSelected?: boolean;
   onSelect?: (activityId: string) => void;
   showCheckbox?: boolean;
@@ -22,6 +23,7 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
   onCode,
   onUncode,
   onDelete,
+  onEdit,
   isSelected = false,
   onSelect,
   showCheckbox = false
@@ -68,6 +70,11 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
       // Auto-hide confirmation after 3 seconds
       setTimeout(() => setShowDeleteConfirm(false), 3000);
     }
+  };
+
+  const handleEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onEdit?.(activity);
   };
 
   const availableTasks = projects.find(p => p.id === selectedProject)?.tasks || [];
@@ -154,6 +161,17 @@ const ActivityItem: React.FC<ActivityItemProps> = ({
           <span className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-lg text-sm">
             Uncoded
           </span>
+        )}
+
+        {/* Edit Button */}
+        {onEdit && (
+          <button
+            onClick={handleEdit}
+            className="p-2 rounded-lg transition-colors hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-400 hover:text-blue-500 dark:hover:text-blue-400"
+            title="Edit activity"
+          >
+            <EditIcon size={16} />
+          </button>
         )}
 
         {/* Delete Button */}

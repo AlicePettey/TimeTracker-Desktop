@@ -60,6 +60,8 @@ const AppLayout: React.FC = () => {
     bulkCodeActivities,
     deleteActivity,
     bulkDeleteActivities,
+    updateActivity,
+    splitActivity,
     addManualEntry,
     addAutoTrackedActivity,
     getTodayActivities,
@@ -69,6 +71,7 @@ const AppLayout: React.FC = () => {
     exportToCSV,
     toggleTracking
   } = useTimeTracker(user);
+
 
 
   // Callback for when tab tracker completes an activity
@@ -177,6 +180,8 @@ const AppLayout: React.FC = () => {
                   onCode={codeActivity}
                   onUncode={uncodeActivity}
                   onDelete={deleteActivity}
+                  onUpdate={updateActivity}
+                  onSplit={splitActivity}
                   todayActivities={todayActivities}
                 />
               </div>
@@ -194,7 +199,6 @@ const AppLayout: React.FC = () => {
           </div>
         );
 
-      
       case 'activities':
         return (
           <ActivityFeed
@@ -205,6 +209,8 @@ const AppLayout: React.FC = () => {
             onDelete={deleteActivity}
             onBulkCode={bulkCodeActivities}
             onBulkDelete={bulkDeleteActivities}
+            onUpdate={updateActivity}
+            onSplit={splitActivity}
             title="All Activities"
             showUncodedOnly={false}
           />
@@ -243,15 +249,17 @@ const AppLayout: React.FC = () => {
               onDelete={deleteActivity}
               onBulkCode={bulkCodeActivities}
               onBulkDelete={bulkDeleteActivities}
+              onUpdate={updateActivity}
+              onSplit={splitActivity}
               title="Uncoded Activities (30 Day Buffer)"
               showUncodedOnly={true}
               maxDays={30}
             />
           </div>
         );
-      
 
       case 'projects':
+
         return (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <ProjectManager

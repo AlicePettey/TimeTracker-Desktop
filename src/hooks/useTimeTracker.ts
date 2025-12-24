@@ -564,6 +564,118 @@ export const useTimeTracker = (user: User | null = null) => {
     setActivities(prev => prev.filter(a => !activityIds.includes(a.id)));
   }, [user]);
 
+  // Update an existing activity
+  const updateActivity = useCallback(async (activityId: string, updates: Partial<Activity>) => {
+    if (user) {
+      const dbUpdates: any = {};
+      if (updates.applicationName !== undefined) dbUpdates.application_name = updates.applicationName;
+      if (updates.windowTitle !== undefined) dbUpdates.window_title = updates.windowTitle;
+      if (updates.startTime !== undefined) dbUpdates.start_time = updates.startTime.toISOString();
+      if (updates.endTime !== undefined) dbUpdates.end_time = updates.endTime.toISOString();
+      if (updates.duration !== undefined) dbUpdates.duration = updates.duration;
+      if (updates.projectId !== undefined) dbUpdates.project_id = updates.projectId || null;
+      if (updates.taskId !== undefined) dbUpdates.task_id = updates.taskId || null;
+      if (updates.isCoded !== undefined) dbUpdates.is_coded = updates.isCoded;
+      if (updates.isIdle !== undefined) dbUpdates.is_idle = updates.isIdle;
+      
+      const { error } = await supabase
+        .from('activities')
+        .update(dbUpdates)
+        .eq('id', activityId);
+      
+      if (error) {
+        console.error('Error updating activity:', error);
+        return;
+      }
+    }
+    
+    setActivities(prev => prev.map(a => 
+      a.id === activityId 
+        ? { 
+            ...a, 
+            ...updates,
+            startTime: updates.startTime ? new Date(updates.startTime) : a.startTime,
+            endTime: updates.endTime ? new Date(updates.endTime) : a.endTime
+          }
+        : a
+    ));
+  }, [user]);
+
+  // Split an activity into multiple activities
+  const splitActivity = useCallback(async (originalActivityId: string, newActivities: Omit<Activity, 'id'>[]) => {
+    if (newActivities.length < 2) return;
+    
+    // First delete the original activity
+    if (user) {
+      const { error: deleteError } = await supabase
+        .from('activities')
+        .delete()
+        .eq('id', originalActivityId);
+      
+      if (deleteError) {
+        console.error('Error deleting original activity for split:', deleteError);
+        return;
+      }
+      
+      // Insert new activities
+      const activitiesToInsert = newActivities.map(activity => ({
+        user_id: user.id,
+        project_id: activity.projectId || null,
+        task_id: activity.taskId || null,
+        application_name: activity.applicationName,
+        window_title: activity.windowTitle,
+        start_time: activity.startTime.toISOString(),
+        end_time: activity.endTime.toISOString(),
+        duration: activity.duration,
+        is_coded: activity.isCoded,
+        is_idle: activity.isIdle
+      }));
+      
+      const { data, error: insertError } = await supabase
+        .from('activities')
+        .insert(activitiesToInsert)
+        .select();
+      
+      if (insertError) {
+        console.error('Error inserting split activities:', insertError);
+        return;
+      }
+      
+      // Transform and add to state
+      const transformedActivities: Activity[] = (data || []).map((a: any) => ({
+        id: a.id,
+        applicationName: a.application_name,
+        windowTitle: a.window_title,
+        startTime: new Date(a.start_time),
+        endTime: new Date(a.end_time),
+        duration: a.duration,
+        projectId: a.project_id || undefined,
+        taskId: a.task_id || undefined,
+        isCoded: a.is_coded,
+        isIdle: a.is_idle
+      }));
+      
+      setActivities(prev => [
+        ...prev.filter(a => a.id !== originalActivityId),
+        ...transformedActivities
+      ].sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()));
+    } else {
+      // Local storage mode
+      const newActivitiesWithIds: Activity[] = newActivities.map(activity => ({
+        ...activity,
+        id: generateId(),
+        startTime: new Date(activity.startTime),
+        endTime: new Date(activity.endTime)
+      }));
+      
+      setActivities(prev => [
+        ...prev.filter(a => a.id !== originalActivityId),
+        ...newActivitiesWithIds
+      ].sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()));
+    }
+  }, [user]);
+
+
 
   // Add manual activity entry
   const addManualEntry = useCallback(async (projectId: string, taskId: string, duration: number, description: string) => {
@@ -801,6 +913,8 @@ export const useTimeTracker = (user: User | null = null) => {
     bulkCodeActivities,
     deleteActivity,
     bulkDeleteActivities,
+    updateActivity,
+    splitActivity,
     addManualEntry,
     addAutoTrackedActivity,
     getUncodedActivities,
@@ -812,4 +926,3 @@ export const useTimeTracker = (user: User | null = null) => {
     migrateLocalDataToDatabase
   };
 };
-
