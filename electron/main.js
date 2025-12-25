@@ -232,20 +232,30 @@ function createWindow() {
 
 // Get the appropriate icon path based on platform
 function getIconPath() {
-  const iconName = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
-  const iconPath = path.join(__dirname, 'assets', iconName);
+  const fs = require('fs');
+  const assetsDir = path.join(__dirname, 'assets');
   
-  // Check if icon exists
-  try {
-    if (require('fs').existsSync(iconPath)) {
-      return iconPath;
+  // Try platform-specific icons first, then fall back to PNG
+  const iconOptions = process.platform === 'win32' 
+    ? ['icon.ico', 'icon.png'] 
+    : process.platform === 'darwin'
+    ? ['icon.icns', 'icon.png']
+    : ['icon.png'];
+  
+  for (const iconName of iconOptions) {
+    const iconPath = path.join(assetsDir, iconName);
+    try {
+      if (fs.existsSync(iconPath)) {
+        return iconPath;
+      }
+    } catch (e) {
+      // Continue to next option
     }
-  } catch (e) {
-    // Ignore
   }
   
   return undefined;
 }
+
 
 // Create a default tray icon
 function createDefaultTrayIcon() {

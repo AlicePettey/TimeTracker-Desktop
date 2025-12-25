@@ -26,7 +26,8 @@
     "release:mac": "electron-builder --mac --publish always",
     "release:linux": "electron-builder --linux --publish always",
     "postinstall": "electron-builder install-app-deps",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "generate-icons": "node scripts/generate-icons.js"
   },
   "dependencies": {
     "active-win": "^8.1.0",
@@ -65,7 +66,8 @@
       "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
       "!**/{appveyor.yml,.travis.yml,circle.yml}",
       "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}",
-      "!dist/**/*"
+      "!dist/**/*",
+      "!scripts/**/*"
     ],
     "asarUnpack": [
       "**/*.node",
@@ -88,8 +90,9 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "assets/icon.ico",
-      "publisherName": "TimeTracker"
+      "icon": "assets/icon.png",
+      "publisherName": "TimeTracker",
+      "forceCodeSigning": false
     },
     "nsis": {
       "oneClick": false,
@@ -97,9 +100,6 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "TimeTracker Desktop",
-      "installerIcon": "assets/icon.ico",
-      "uninstallerIcon": "assets/icon.ico",
-      "installerHeaderIcon": "assets/icon.ico",
       "deleteAppDataOnUninstall": false,
       "perMachine": false,
       "allowElevation": true,
@@ -116,7 +116,7 @@
           "arch": ["universal"]
         }
       ],
-      "icon": "assets/icon.icns",
+      "icon": "assets/icon.png",
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
@@ -134,7 +134,7 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "assets/icons",
+      "icon": "assets/icon.png",
       "category": "Office",
       "maintainer": "TimeTracker <support@ndsenterprises.llc>",
       "vendor": "TimeTracker",
