@@ -87,3 +87,39 @@
     "vite": "^7.3.0"
   }
 }
+
+"build": {
+  "appId": "com.timetracker.desktop",
+  "productName": "TimeTracker",
+  "directories": {
+    "output": "dist"
+  },
+  "files": [
+    "dist/**",
+    "electron/**"
+  ],
+  "extraFiles": [
+     {
+      "from": "node_modules/electron/dist/ffmpeg.dll",
+      "to": "."
+    },
+    {
+      "from": "node_modules/electron/dist/icudtl.dat",
+      "to": "."
+    },
+    {
+      "from": "node_modules/electron/dist/v8_context_snapshot.bin",
+      "to": "."
+    },
+    {
+      "from": "node_modules/electron/dist/snapshot_blob.bin",
+      "to": "."
+    }
+  ],
+  "win": {
+    "icon": "electron/assets/icon.ico"
+  },
+  "linux": {
+    "icon": "electron/assets"
+  }
+}
