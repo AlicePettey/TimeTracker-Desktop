@@ -58,25 +58,40 @@ npm run build:all
 
 ### Windows: "Cannot create symbolic link" Error
 
-This error occurs when Windows doesn't have permission to create symbolic links.
+This error occurs when electron-builder tries to extract winCodeSign files that contain macOS symlinks.
 
-**Solution 1: Enable Developer Mode (Recommended)**
+**Solution 1: Clear Cache and Rebuild (Recommended)**
+
+The `package.json` has been configured to skip code signing (`signAndEditExecutable: false`), but you may need to clear the corrupted cache first:
+
+```powershell
+# Delete the electron-builder cache
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\electron-builder\Cache"
+
+# Or using cmd
+rmdir /s /q %LOCALAPPDATA%\electron-builder\Cache
+
+# Then rebuild
+npm run build
+```
+
+**Solution 2: Enable Developer Mode**
+
+If you want to enable code signing later:
+
 1. Open Windows Settings
-2. Go to "Update & Security" > "For developers"
+2. Go to "System" > "For developers" (Windows 11) or "Update & Security" > "For developers" (Windows 10)
 3. Enable "Developer Mode"
 4. Restart your terminal and try again
 
-**Solution 2: Run as Administrator**
+**Solution 3: Run as Administrator**
+
 1. Right-click on Command Prompt or PowerShell
 2. Select "Run as administrator"
 3. Navigate to the electron folder and run `npm run build`
 
-**Solution 3: Clear Cache**
-```bash
-# Delete the electron-builder cache
-rmdir /s /q %LOCALAPPDATA%\electron-builder\Cache
-npm run build
-```
+**Note:** The current configuration disables code signing for development builds. For production releases that require code signing, you'll need either Developer Mode enabled or to run as Administrator.
+
 
 ### Linux: "EOF" or ICNS Conversion Error
 

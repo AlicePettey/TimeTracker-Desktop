@@ -92,8 +92,11 @@
       ],
       "icon": "assets/icon.png",
       "publisherName": "TimeTracker",
-      "forceCodeSigning": false
+      "forceCodeSigning": false,
+      "signAndEditExecutable": false,
+      "sign": null
     },
+
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
