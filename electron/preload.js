@@ -89,5 +89,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }
 });
 
+import { contextBridge } from "electron";
+
+contextBridge.exposeInMainWorld("api", {
+  example: () => console.log("From Electron preload!"),
+});
+
 // Log that preload script has loaded
 console.log('TimeTracker Desktop preload script loaded');
