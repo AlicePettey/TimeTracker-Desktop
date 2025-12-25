@@ -25,7 +25,6 @@ Download the latest release for your platform from [GitHub Releases](https://git
 | macOS | `.dmg` installer | Universal (Intel + Apple Silicon) |
 | Linux | `.AppImage` | Portable, works on most distros |
 | Linux | `.deb` | For Debian/Ubuntu |
-| Linux | `.rpm` | For Fedora/RHEL |
 
 ### Build from Source
 
@@ -48,6 +47,50 @@ npm run build:win    # Windows
 npm run build:mac    # macOS
 npm run build:linux  # Linux
 ```
+
+## Troubleshooting
+
+### ICU Data Error (Windows)
+
+If you see the error `Invalid file descriptor to ICU data received`:
+
+1. **Make sure you're using Electron 28.x** - Newer versions may have compatibility issues
+2. **Clean install dependencies**:
+   ```bash
+   rm -rf node_modules
+   rm package-lock.json
+   npm install
+   ```
+3. **Rebuild native modules**:
+   ```bash
+   npm run postinstall
+   ```
+4. **Run from local drive** - Don't run from network storage
+
+### Build Issues
+
+If the build fails:
+
+1. **Update electron-builder**:
+   ```bash
+   npm install electron-builder@latest --save-dev
+   ```
+
+2. **Clear build cache**:
+   ```bash
+   npm run clean
+   npm run build
+   ```
+
+3. **Check Node.js version** - Use Node.js 18.x or 20.x LTS
+
+### active-win Not Working
+
+The `active-win` module requires native compilation:
+
+1. **Windows**: Install Visual Studio Build Tools
+2. **macOS**: Install Xcode Command Line Tools (`xcode-select --install`)
+3. **Linux**: Install build-essential (`sudo apt install build-essential`)
 
 ## Configuration
 
@@ -204,4 +247,3 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - [GitHub Issues](https://github.com/timetracker/timetracker-desktop/issues)
 - [Documentation](https://docs.timetracker.app)
-- [Discord Community](https://discord.gg/timetracker)

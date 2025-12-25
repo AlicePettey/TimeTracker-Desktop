@@ -5,20 +5,42 @@
  * and automatically download and install them.
  */
 
-const { autoUpdater } = require('electron-updater');
-const { app, dialog, BrowserWindow, ipcMain } = require('electron');
-const log = require('electron-log');
+const { app, dialog, ipcMain } = require('electron');
 
-// Configure logging
-log.transports.file.level = 'info';
-autoUpdater.logger = log;
-autoUpdater.logger.transports.file.level = 'info';
+// Try to load electron-log, fall back to console if not available
+let log;
+try {
+  log = require('electron-log');
+  log.transports.file.level = 'info';
+} catch (e) {
+  // Fallback to console
+  log = {
+    info: (...args) => console.log('[INFO]', ...args),
+    error: (...args) => console.error('[ERROR]', ...args),
+    warn: (...args) => console.warn('[WARN]', ...args),
+    transports: { file: { level: 'info' } }
+  };
+}
 
-// Auto-updater configuration
-autoUpdater.autoDownload = false; // Don't auto-download, let user decide
-autoUpdater.autoInstallOnAppQuit = true;
-autoUpdater.allowDowngrade = false;
-autoUpdater.allowPrerelease = false;
+// Try to load electron-updater
+let autoUpdater;
+try {
+  const { autoUpdater: au } = require('electron-updater');
+  autoUpdater = au;
+  autoUpdater.logger = log;
+  if (autoUpdater.logger.transports) {
+    autoUpdater.logger.transports.file.level = 'info';
+  }
+  
+  // Auto-updater configuration
+  autoUpdater.autoDownload = false; // Don't auto-download, let user decide
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowDowngrade = false;
+  autoUpdater.allowPrerelease = false;
+} catch (e) {
+  log.error('Failed to load electron-updater:', e);
+  autoUpdater = null;
+}
 
 class AppUpdater {
   constructor() {
@@ -27,8 +49,11 @@ class AppUpdater {
     this.updateDownloaded = false;
     this.updateInfo = null;
     this.downloadProgress = 0;
+    this.isInitialized = false;
     
-    this.setupEventHandlers();
+    if (autoUpdater) {
+      this.setupEventHandlers();
+    }
     this.setupIpcHandlers();
   }
 
@@ -37,12 +62,15 @@ class AppUpdater {
    */
   setMainWindow(window) {
     this.mainWindow = window;
+    this.isInitialized = true;
   }
 
   /**
    * Setup auto-updater event handlers
    */
   setupEventHandlers() {
+    if (!autoUpdater) return;
+
     // Checking for updates
     autoUpdater.on('checking-for-update', () => {
       log.info('Checking for updates...');
@@ -103,6 +131,9 @@ class AppUpdater {
   setupIpcHandlers() {
     // Check for updates manually
     ipcMain.handle('check-for-updates', async () => {
+      if (!autoUpdater) {
+        return { success: false, error: 'Auto-updater not available' };
+      }
       try {
         const result = await autoUpdater.checkForUpdates();
         return { success: true, result };
@@ -114,6 +145,9 @@ class AppUpdater {
 
     // Download update
     ipcMain.handle('download-update', async () => {
+      if (!autoUpdater) {
+        return { success: false, error: 'Auto-updater not available' };
+      }
       try {
         if (this.updateAvailable) {
           await autoUpdater.downloadUpdate();
@@ -128,6 +162,9 @@ class AppUpdater {
 
     // Install update and restart
     ipcMain.handle('install-update', () => {
+      if (!autoUpdater) {
+        return { success: false, error: 'Auto-updater not available' };
+      }
       if (this.updateDownloaded) {
         autoUpdater.quitAndInstall(false, true);
         return { success: true };
@@ -142,7 +179,8 @@ class AppUpdater {
         updateDownloaded: this.updateDownloaded,
         updateInfo: this.updateInfo,
         downloadProgress: this.downloadProgress,
-        currentVersion: app.getVersion()
+        currentVersion: app.getVersion(),
+        autoUpdaterAvailable: !!autoUpdater
       };
     });
 
@@ -153,13 +191,17 @@ class AppUpdater {
 
     // Set auto-download preference
     ipcMain.handle('set-auto-download', (event, enabled) => {
-      autoUpdater.autoDownload = enabled;
+      if (autoUpdater) {
+        autoUpdater.autoDownload = enabled;
+      }
       return { success: true };
     });
 
     // Set allow prerelease preference
     ipcMain.handle('set-allow-prerelease', (event, enabled) => {
-      autoUpdater.allowPrerelease = enabled;
+      if (autoUpdater) {
+        autoUpdater.allowPrerelease = enabled;
+      }
       return { success: true };
     });
   }
@@ -177,19 +219,25 @@ class AppUpdater {
    * Show dialog when update is available
    */
   async showUpdateAvailableDialog(info) {
-    const { response } = await dialog.showMessageBox(this.mainWindow, {
-      type: 'info',
-      title: 'Update Available',
-      message: `A new version of TimeTracker Desktop is available!`,
-      detail: `Version ${info.version} is ready to download.\n\nCurrent version: ${app.getVersion()}\n\nWould you like to download it now?`,
-      buttons: ['Download Now', 'Later'],
-      defaultId: 0,
-      cancelId: 1
-    });
+    if (!this.mainWindow) return;
+    
+    try {
+      const { response } = await dialog.showMessageBox(this.mainWindow, {
+        type: 'info',
+        title: 'Update Available',
+        message: `A new version of TimeTracker Desktop is available!`,
+        detail: `Version ${info.version} is ready to download.\n\nCurrent version: ${app.getVersion()}\n\nWould you like to download it now?`,
+        buttons: ['Download Now', 'Later'],
+        defaultId: 0,
+        cancelId: 1
+      });
 
-    if (response === 0) {
-      this.sendStatusToWindow('downloading');
-      autoUpdater.downloadUpdate();
+      if (response === 0 && autoUpdater) {
+        this.sendStatusToWindow('downloading');
+        autoUpdater.downloadUpdate();
+      }
+    } catch (error) {
+      log.error('Error showing update dialog:', error);
     }
   }
 
@@ -197,18 +245,24 @@ class AppUpdater {
    * Show dialog when update is downloaded and ready to install
    */
   async showUpdateReadyDialog(info) {
-    const { response } = await dialog.showMessageBox(this.mainWindow, {
-      type: 'info',
-      title: 'Update Ready',
-      message: 'Update downloaded successfully!',
-      detail: `Version ${info.version} has been downloaded and is ready to install.\n\nThe application will restart to complete the update.`,
-      buttons: ['Restart Now', 'Later'],
-      defaultId: 0,
-      cancelId: 1
-    });
+    if (!this.mainWindow) return;
+    
+    try {
+      const { response } = await dialog.showMessageBox(this.mainWindow, {
+        type: 'info',
+        title: 'Update Ready',
+        message: 'Update downloaded successfully!',
+        detail: `Version ${info.version} has been downloaded and is ready to install.\n\nThe application will restart to complete the update.`,
+        buttons: ['Restart Now', 'Later'],
+        defaultId: 0,
+        cancelId: 1
+      });
 
-    if (response === 0) {
-      autoUpdater.quitAndInstall(false, true);
+      if (response === 0 && autoUpdater) {
+        autoUpdater.quitAndInstall(false, true);
+      }
+    } catch (error) {
+      log.error('Error showing update ready dialog:', error);
     }
   }
 
@@ -216,13 +270,18 @@ class AppUpdater {
    * Check for updates (called on app start and periodically)
    */
   async checkForUpdates(silent = false) {
+    if (!autoUpdater) {
+      log.warn('Auto-updater not available');
+      return null;
+    }
+    
     try {
       log.info('Checking for updates...');
       const result = await autoUpdater.checkForUpdates();
       return result;
     } catch (error) {
       log.error('Error checking for updates:', error);
-      if (!silent) {
+      if (!silent && this.mainWindow) {
         dialog.showErrorBox(
           'Update Check Failed',
           `Failed to check for updates: ${error.message}`
@@ -233,12 +292,17 @@ class AppUpdater {
   }
 
   /**
-   * Start periodic update checks (every 4 hours)
+   * Start periodic update checks (every N hours)
    */
   startPeriodicUpdateChecks(intervalHours = 4) {
+    if (!autoUpdater) {
+      log.warn('Auto-updater not available, skipping periodic checks');
+      return;
+    }
+    
     const intervalMs = intervalHours * 60 * 60 * 1000;
     
-    // Check immediately on start (after a short delay)
+    // Check after a short delay on start
     setTimeout(() => {
       this.checkForUpdates(true);
     }, 10000); // 10 seconds after app start
@@ -255,6 +319,7 @@ class AppUpdater {
    * Get the feed URL for updates
    */
   getFeedUrl() {
+    if (!autoUpdater) return null;
     return autoUpdater.getFeedURL();
   }
 
@@ -262,6 +327,7 @@ class AppUpdater {
    * Set custom feed URL (for enterprise/self-hosted)
    */
   setFeedUrl(url) {
+    if (!autoUpdater) return;
     autoUpdater.setFeedURL({
       provider: 'generic',
       url: url

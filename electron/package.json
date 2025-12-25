@@ -17,63 +17,59 @@
     "start": "electron .",
     "dev": "electron . --enable-logging",
     "build": "electron-builder",
-    "build:win": "electron-builder --win --publish always",
-    "build:mac": "electron-builder --mac --publish always",
-    "build:linux": "electron-builder --linux --publish always",
-    "build:all": "electron-builder -mwl --publish always",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder -mwl",
     "release": "electron-builder --publish always",
-    "postinstall": "electron-builder install-app-deps"
+    "release:win": "electron-builder --win --publish always",
+    "release:mac": "electron-builder --mac --publish always",
+    "release:linux": "electron-builder --linux --publish always",
+    "postinstall": "electron-builder install-app-deps",
+    "clean": "rimraf dist"
   },
   "dependencies": {
     "active-win": "^8.1.0",
+    "electron-log": "^5.1.1",
     "electron-store": "^8.1.0",
     "electron-updater": "^6.1.7",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
-    "electron": "^39.2.7",
-    "electron-builder": "^24.9.1",
-    "electron-notarize": "^1.2.2"
+    "electron": "^28.2.0",
+    "electron-builder": "^24.13.3",
+    "rimraf": "^5.0.5"
   },
   "build": {
     "appId": "com.timetracker.desktop",
     "productName": "TimeTracker Desktop",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "copyright": "Copyright © 2024 TimeTracker",
+    "asar": true,
+    "compression": "maximum",
     "directories": {
       "output": "dist",
       "buildResources": "assets"
     },
     "files": [
       "**/*",
+      "!**/*.ts",
+      "!**/*.map",
       "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
       "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
-      "!**/node_modules/*.d.ts",
+      "!**/node_modules/**/*.d.ts",
       "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}",
       "!.editorconfig",
       "!**/._*",
       "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}",
       "!**/{__pycache__,thumbs.db,.flowconfig,.idea,.vs,.nyc_output}",
       "!**/{appveyor.yml,.travis.yml,circle.yml}",
-      "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}"
+      "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}",
+      "!dist/**/*"
     ],
-     "extraFiles": [
-    {
-      "from": "node_modules/electron/dist/icudtl.dat",
-      "to": "."
-    },
-    {
-      "from": "node_modules/electron/dist/snapshot_blob.bin",
-      "to": "."
-    },
-    {
-      "from": "node_modules/electron/dist/v8_context_snapshot.bin",
-      "to": "."
-    },
-    {
-      "from": "node_modules/electron/dist/ffmpeg.dll",
-      "to": "."
-    }
+    "asarUnpack": [
+      "**/*.node",
+      "**/node_modules/active-win/**/*"
     ],
     "publish": {
       "provider": "github",
@@ -85,78 +81,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64",
-            "ia32"
-          ]
+          "arch": ["x64"]
         },
         {
           "target": "portable",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
         }
       ],
       "icon": "assets/icon.ico",
-      "publisherName": "TimeTracker",
-      "verifyUpdateCodeSignature": true,
-      "signAndEditExecutable": true,
-      "certificateSubjectName": "TimeTracker",
-      "certificateSha1": "",
-      "rfc3161TimeStampServer": "http://timestamp.digicert.com"
-    },
-    "mac": {
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "universal"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "universal"
-          ]
-        }
-      ],
-      "icon": "assets/icon.icns",
-      "category": "public.app-category.productivity",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "entitlements.mac.plist",
-      "entitlementsInherit": "entitlements.mac.plist",
-      "notarize": {
-        "teamId": "${env.APPLE_TEAM_ID}"
-      }
-    },
-    "linux": {
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "deb",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "rpm",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "assets/icons",
-      "category": "Office",
-      "maintainer": "TimeTracker <support@timetracker.app>",
-      "vendor": "TimeTracker",
-      "synopsis": "System-wide time tracking",
-      "description": "Track time across all applications with automatic idle detection and cloud sync"
+      "publisherName": "TimeTracker"
     },
     "nsis": {
       "oneClick": false,
@@ -167,8 +100,46 @@
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
       "installerHeaderIcon": "assets/icon.ico",
-      "license": "assets/LICENSE.txt",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "runAfterFinish": true
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        },
+        {
+          "target": "zip",
+          "arch": ["universal"]
+        }
+      ],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icons",
+      "category": "Office",
+      "maintainer": "TimeTracker <support@ndsenterprises.llc>",
+      "vendor": "TimeTracker",
+      "synopsis": "System-wide time tracking",
+      "description": "Track time across all applications with automatic idle detection and cloud sync"
     },
     "dmg": {
       "contents": [
@@ -189,7 +160,7 @@
       }
     },
     "appImage": {
-      "license": "LICENSE.txt"
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     }
   }
 }

@@ -1,35 +1,51 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, powerMonitor, screen, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, powerMonitor, shell } = require('electron');
 const path = require('path');
-const Store = require('electron-store');
 const { v4: uuidv4 } = require('uuid');
-const ActivityTracker = require('./tracker');
-const appUpdater = require('./updater');
 
-import { app, BrowserWindow } from "electron";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-    },
-  });
-
-  win.loadFile(path.join(__dirname, "../dist/index.html"));
+// Handle ICU data path for packaged apps
+if (app.isPackaged) {
+  // Set the ICU data file path explicitly for packaged apps
+  const icuDataPath = path.join(process.resourcesPath, 'icudtl.dat');
+  if (require('fs').existsSync(icuDataPath)) {
+    process.env.ICU_DATA = icuDataPath;
+  }
 }
 
-app.whenReady().then(createWindow);
-
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
-
 // Initialize electron store for persistent data
+let Store;
+try {
+  Store = require('electron-store');
+} catch (e) {
+  console.error('Failed to load electron-store:', e);
+  // Fallback to a simple in-memory store
+  Store = class {
+    constructor(opts) {
+      this.data = opts?.defaults || {};
+    }
+    get(key, defaultValue) {
+      const keys = key.split('.');
+      let value = this.data;
+      for (const k of keys) {
+        value = value?.[k];
+      }
+      return value !== undefined ? value : defaultValue;
+    }
+    set(key, value) {
+      if (typeof key === 'object') {
+        Object.assign(this.data, key);
+      } else {
+        const keys = key.split('.');
+        let obj = this.data;
+        for (let i = 0; i < keys.length - 1; i++) {
+          if (!obj[keys[i]]) obj[keys[i]] = {};
+          obj = obj[keys[i]];
+        }
+        obj[keys[keys.length - 1]] = value;
+      }
+    }
+  };
+}
+
 const store = new Store({
   name: 'timetracker-data',
   defaults: {
@@ -44,17 +60,122 @@ const store = new Store({
       minimizeToTray: true,
       trackingEnabled: true,
       autoUpdate: true,
-      allowPrerelease: false
+      allowPrerelease: false,
+      // Auto-sync settings
+      syncInterval: 15, // minutes (5, 15, or 30)
+      syncOnClose: true,
+      syncOnIdle: true,
+      autoSyncEnabled: true,
+      syncOnStartup: true,
+      batchSize: 50,
+      retryFailedSyncs: true,
+      maxRetryAttempts: 3
     },
     syncQueue: [],
-    lastSyncTime: null
+    lastSyncTime: null,
+    failedSyncAttempts: 0
   }
 });
+
+
+// Auto-sync timer
+let autoSyncTimer = null;
+let isIdle = false;
 
 let mainWindow = null;
 let tray = null;
 let tracker = null;
+let appUpdater = null;
 let isQuitting = false;
+
+// Start auto-sync timer based on settings
+function startAutoSyncTimer() {
+  stopAutoSyncTimer();
+  
+  const settings = store.get('settings');
+  if (!settings.autoSyncEnabled || !settings.syncEnabled) {
+    console.log('Auto-sync disabled');
+    return;
+  }
+  
+  const intervalMs = settings.syncInterval * 60 * 1000; // Convert minutes to ms
+  console.log(`Starting auto-sync timer: every ${settings.syncInterval} minutes`);
+  
+  autoSyncTimer = setInterval(async () => {
+    const currentSettings = store.get('settings');
+    if (currentSettings.autoSyncEnabled && currentSettings.syncEnabled) {
+      console.log('Auto-sync triggered by timer');
+      await syncActivities();
+    }
+  }, intervalMs);
+}
+
+// Stop auto-sync timer
+function stopAutoSyncTimer() {
+  if (autoSyncTimer) {
+    clearInterval(autoSyncTimer);
+    autoSyncTimer = null;
+  }
+}
+
+// Handle idle-based sync
+function handleIdleSync() {
+  const settings = store.get('settings');
+  if (settings.syncOnIdle && settings.syncEnabled && !isIdle) {
+    isIdle = true;
+    console.log('Idle detected, triggering sync');
+    syncActivities();
+  }
+}
+
+// Handle idle end
+function handleIdleEnd() {
+  isIdle = false;
+}
+
+// Sync on app close
+async function syncOnClose() {
+  const settings = store.get('settings');
+  if (settings.syncOnClose && settings.syncEnabled) {
+    console.log('App closing, triggering final sync');
+    await syncActivities();
+  }
+}
+
+// Sync on startup
+async function syncOnStartup() {
+  const settings = store.get('settings');
+  if (settings.syncOnStartup && settings.syncEnabled) {
+    console.log('App starting, triggering startup sync');
+    // Wait a bit for network to be ready
+    setTimeout(async () => {
+      await syncActivities();
+    }, 5000);
+  }
+}
+
+
+// Lazy load the tracker to handle potential module loading issues
+async function loadTracker() {
+  try {
+    const ActivityTracker = require('./tracker');
+    return ActivityTracker;
+  } catch (error) {
+    console.error('Failed to load tracker:', error);
+    return null;
+  }
+}
+
+// Lazy load the updater
+async function loadUpdater() {
+  try {
+    const updater = require('./updater');
+    return updater;
+  } catch (error) {
+    console.error('Failed to load updater:', error);
+    return null;
+  }
+}
 
 // Create the main application window
 function createWindow() {
@@ -69,25 +190,29 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      sandbox: false // Required for some native modules
     },
-    icon: path.join(__dirname, 'assets', 'icon.png'),
+    icon: getIconPath(),
     show: false
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   // Show window when ready
-  mainWindow.once('ready-to-show', () => {
+  mainWindow.once('ready-to-show', async () => {
     mainWindow.show();
     
-    // Set main window reference for updater
-    appUpdater.setMainWindow(mainWindow);
-    
-    // Start periodic update checks if enabled
-    const settings = store.get('settings');
-    if (settings.autoUpdate) {
-      appUpdater.startPeriodicUpdateChecks(4); // Check every 4 hours
+    // Initialize updater after window is ready
+    appUpdater = await loadUpdater();
+    if (appUpdater) {
+      appUpdater.setMainWindow(mainWindow);
+      
+      // Start periodic update checks if enabled
+      const settings = store.get('settings');
+      if (settings.autoUpdate) {
+        appUpdater.startPeriodicUpdateChecks(4); // Check every 4 hours
+      }
     }
   });
 
@@ -105,71 +230,68 @@ function createWindow() {
   });
 }
 
+// Get the appropriate icon path based on platform
+function getIconPath() {
+  const iconName = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
+  const iconPath = path.join(__dirname, 'assets', iconName);
+  
+  // Check if icon exists
+  try {
+    if (require('fs').existsSync(iconPath)) {
+      return iconPath;
+    }
+  } catch (e) {
+    // Ignore
+  }
+  
+  return undefined;
+}
+
+// Create a default tray icon
+function createDefaultTrayIcon() {
+  // Create a simple 16x16 blue square icon
+  const size = 16;
+  const canvas = Buffer.alloc(size * size * 4);
+  
+  for (let i = 0; i < size * size; i++) {
+    const offset = i * 4;
+    canvas[offset] = 59;     // R (blue color)
+    canvas[offset + 1] = 130; // G
+    canvas[offset + 2] = 246; // B
+    canvas[offset + 3] = 255; // A
+  }
+  
+  return nativeImage.createFromBuffer(canvas, { width: size, height: size });
+}
+
 // Create system tray icon
 function createTray() {
   const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
   
-  // Create a simple icon if file doesn't exist
   let trayIcon;
   try {
-    trayIcon = nativeImage.createFromPath(iconPath);
+    if (require('fs').existsSync(iconPath)) {
+      trayIcon = nativeImage.createFromPath(iconPath);
+    }
   } catch (e) {
-    // Create a simple 16x16 icon
-    trayIcon = nativeImage.createEmpty();
+    // Ignore
   }
 
-  tray = new Tray(trayIcon.isEmpty() ? nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAdgAAAHYBTnsmCAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAADASURBVDiNpZMxDoMwDEV/kDp07dKxN+AqHIEjcCOOwBE4AkfhCIzduqRLh0oZGhJIIFWf5Nj+/rYTQAgh/BsAcM6NjLEZgBmAMYABgB6ADoAWgAaAGoAKgBKAAoAcgAyAFIAEgBiACIAQgAAAH4APgAeAC4ADgA2ABYAFQP7/AwBYa0fG2ATABMAYwBBAD0AHQAtAA0ANQAVACUABQAZACkACQAxABEAIQACAD4AHgAuAA4ANgAWABYAFgP0GvgDxBwAAAABJRU5ErkJggg==') : trayIcon);
+  // Use default icon if file doesn't exist or is empty
+  if (!trayIcon || trayIcon.isEmpty()) {
+    trayIcon = createDefaultTrayIcon();
+  }
 
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: 'Show TimeTracker',
-      click: () => {
-        if (mainWindow) {
-          mainWindow.show();
-          mainWindow.focus();
-        }
-      }
-    },
-    {
-      label: 'Tracking',
-      submenu: [
-        {
-          label: 'Start Tracking',
-          click: () => {
-            if (tracker) tracker.start();
-            updateTrayMenu();
-          }
-        },
-        {
-          label: 'Pause Tracking',
-          click: () => {
-            if (tracker) tracker.pause();
-            updateTrayMenu();
-          }
-        }
-      ]
-    },
-    { type: 'separator' },
-    {
-      label: 'Sync Now',
-      click: () => syncActivities()
-    },
-    {
-      label: 'Check for Updates',
-      click: () => appUpdater.checkForUpdates(false)
-    },
-    { type: 'separator' },
-    {
-      label: 'Quit',
-      click: () => {
-        isQuitting = true;
-        app.quit();
-      }
-    }
-  ]);
+  // Resize for tray (16x16 on most platforms)
+  if (!trayIcon.isEmpty()) {
+    trayIcon = trayIcon.resize({ width: 16, height: 16 });
+  }
+
+  tray = new Tray(trayIcon);
+
+  updateTrayMenu();
 
   tray.setToolTip('TimeTracker Desktop');
-  tray.setContextMenu(contextMenu);
 
   tray.on('click', () => {
     if (mainWindow) {
@@ -199,7 +321,7 @@ function updateTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: isTracking ? '⏸ Pause Tracking' : '▶ Start Tracking',
+      label: isTracking ? 'Pause Tracking' : 'Start Tracking',
       click: () => {
         if (tracker) {
           if (isTracking) {
@@ -218,7 +340,11 @@ function updateTrayMenu() {
     },
     {
       label: 'Check for Updates',
-      click: () => appUpdater.checkForUpdates(false)
+      click: () => {
+        if (appUpdater) {
+          appUpdater.checkForUpdates(false);
+        }
+      }
     },
     { type: 'separator' },
     {
@@ -235,7 +361,13 @@ function updateTrayMenu() {
 }
 
 // Initialize activity tracker
-function initializeTracker() {
+async function initializeTracker() {
+  const ActivityTracker = await loadTracker();
+  if (!ActivityTracker) {
+    console.error('Could not initialize tracker');
+    return;
+  }
+
   const settings = store.get('settings');
   
   tracker = new ActivityTracker({
@@ -267,11 +399,15 @@ function initializeTracker() {
       if (mainWindow && mainWindow.webContents) {
         mainWindow.webContents.send('idle-started');
       }
+      // Trigger sync on idle if enabled
+      handleIdleSync();
     },
     onIdleEnd: (idleDuration) => {
       if (mainWindow && mainWindow.webContents) {
         mainWindow.webContents.send('idle-ended', idleDuration);
       }
+      // Reset idle state
+      handleIdleEnd();
     },
     onStatusChange: (status) => {
       if (mainWindow && mainWindow.webContents) {
@@ -283,11 +419,16 @@ function initializeTracker() {
 
   // Start tracking if enabled
   if (settings.trackingEnabled) {
-    tracker.start();
+    // Wait a bit for active-win to initialize
+    setTimeout(() => {
+      if (tracker) tracker.start();
+    }, 2000);
   }
 }
 
-// Sync activities to web app
+
+
+// Sync activities to web app using Supabase Edge Function
 async function syncActivities() {
   const settings = store.get('settings');
   
@@ -303,32 +444,70 @@ async function syncActivities() {
     return { success: true, synced: 0 };
   }
 
+  const deviceId = getDeviceId();
+
   try {
-    const response = await fetch(`${settings.syncUrl}/api/sync`, {
+    // Use the Supabase Edge Function endpoint
+    const syncUrl = settings.syncUrl.replace(/\/$/, ''); // Remove trailing slash
+    const response = await fetch(`${syncUrl}/functions/v1/desktop-sync`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${settings.syncToken}`
+        'x-sync-token': settings.syncToken,
+        'x-device-id': deviceId
       },
       body: JSON.stringify({
-        activities: syncQueue,
-        deviceId: getDeviceId(),
-        timestamp: new Date().toISOString()
+        activities: syncQueue.map(a => ({
+          applicationName: a.applicationName,
+          windowTitle: a.windowTitle || '',
+          startTime: a.startTime,
+          endTime: a.endTime,
+          duration: a.duration,
+          projectId: a.projectId || null,
+          taskId: a.taskId || null,
+          isCoded: a.isCoded || false,
+          isIdle: a.isIdle || false,
+          categoryId: a.categoryId || null,
+          categoryAutoAssigned: a.categoryAutoAssigned || false
+        })),
+        deviceId: deviceId,
+        deviceName: require('os').hostname(),
+        platform: process.platform,
+        timestamp: new Date().toISOString(),
+        syncType: 'push'
       })
     });
 
-    if (response.ok) {
-      const result = await response.json();
+    const result = await response.json();
+
+    if (response.ok && result.success) {
+      // Clear synced activities from queue
       store.set('syncQueue', []);
       store.set('lastSyncTime', new Date().toISOString());
       
       if (mainWindow && mainWindow.webContents) {
-        mainWindow.webContents.send('sync-completed', { success: true, synced: syncQueue.length });
+        mainWindow.webContents.send('sync-completed', { 
+          success: true, 
+          synced: result.syncedCount || syncQueue.length,
+          syncId: result.syncId
+        });
       }
       
-      return { success: true, synced: syncQueue.length };
+      console.log(`Sync completed: ${result.syncedCount} activities synced`);
+      return { success: true, synced: result.syncedCount || syncQueue.length };
+    } else if (response.status === 429) {
+      // Rate limited
+      console.warn('Sync rate limited:', result.message);
+      if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send('sync-completed', { 
+          success: false, 
+          error: 'Rate limited. Please try again later.',
+          retryAfter: response.headers.get('X-RateLimit-Reset')
+        });
+      }
+      return { success: false, error: 'Rate limited' };
     } else {
-      throw new Error(`Sync failed: ${response.status}`);
+      throw new Error(result.message || `Sync failed: ${response.status}`);
     }
   } catch (error) {
     console.error('Sync error:', error);
@@ -338,6 +517,7 @@ async function syncActivities() {
     return { success: false, error: error.message };
   }
 }
+
 
 function getDeviceId() {
   let deviceId = store.get('deviceId');
@@ -383,20 +563,37 @@ function setupIpcHandlers() {
     }
     
     // Update auto-start setting
-    app.setLoginItemSettings({
-      openAtLogin: updatedSettings.startOnBoot,
-      openAsHidden: true
-    });
+    try {
+      app.setLoginItemSettings({
+        openAtLogin: updatedSettings.startOnBoot,
+        openAsHidden: true
+      });
+    } catch (e) {
+      console.error('Failed to set login item settings:', e);
+    }
     
     // Update auto-update settings
-    if (updatedSettings.autoUpdate !== currentSettings.autoUpdate) {
+    if (appUpdater && updatedSettings.autoUpdate !== currentSettings.autoUpdate) {
       if (updatedSettings.autoUpdate) {
         appUpdater.startPeriodicUpdateChecks(4);
       }
     }
     
+    // Update auto-sync timer if sync settings changed
+    if (updatedSettings.autoSyncEnabled !== currentSettings.autoSyncEnabled ||
+        updatedSettings.syncInterval !== currentSettings.syncInterval ||
+        updatedSettings.syncEnabled !== currentSettings.syncEnabled) {
+      if (updatedSettings.autoSyncEnabled && updatedSettings.syncEnabled) {
+        startAutoSyncTimer();
+      } else {
+        stopAutoSyncTimer();
+      }
+    }
+    
     return updatedSettings;
   });
+
+
 
   // Start tracking
   ipcMain.handle('start-tracking', () => {
@@ -527,12 +724,18 @@ function setupPowerMonitor() {
 }
 
 // App lifecycle
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   createWindow();
   createTray();
   setupIpcHandlers();
-  initializeTracker();
+  await initializeTracker();
   setupPowerMonitor();
+  
+  // Start auto-sync timer
+  startAutoSyncTimer();
+  
+  // Sync on startup if enabled
+  syncOnStartup();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -550,15 +753,37 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
   isQuitting = true;
+  
+  // Stop auto-sync timer
+  stopAutoSyncTimer();
+  
+  // Sync on close if enabled
+  await syncOnClose();
+  
   if (tracker) {
     tracker.stop();
   }
 });
 
+
+
 // Auto-start on boot
-app.setLoginItemSettings({
-  openAtLogin: store.get('settings.startOnBoot', true),
-  openAsHidden: true
+try {
+  app.setLoginItemSettings({
+    openAtLogin: store.get('settings.startOnBoot', true),
+    openAsHidden: true
+  });
+} catch (e) {
+  console.error('Failed to set login item settings:', e);
+}
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled rejection at:', promise, 'reason:', reason);
 });

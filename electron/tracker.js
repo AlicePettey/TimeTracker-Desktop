@@ -196,37 +196,55 @@ class ActivityTracker {
     this.customRules = [];
     this.manualOverrides = new Map(); // activityId -> categoryId
 
-    // Lazy load active-win (it's an ES module in newer versions)
+    // Active-win module (loaded asynchronously)
     this.activeWin = null;
+    this.activeWinLoaded = false;
+    this.activeWinLoadError = null;
+    
+    // Start loading active-win
     this.loadActiveWin();
   }
 
   async loadActiveWin() {
     try {
-      // Try to dynamically import active-win
+      // active-win is an ESM module in v8+, need dynamic import
       const activeWinModule = await import('active-win');
-      this.activeWin = activeWinModule.default || activeWinModule;
+      this.activeWin = activeWinModule.default || activeWinModule.activeWindow || activeWinModule;
+      this.activeWinLoaded = true;
+      console.log('active-win loaded successfully');
     } catch (error) {
-      console.error('Failed to load active-win:', error);
-      // Fallback to a mock implementation for development
+      console.error('Failed to load active-win:', error.message);
+      this.activeWinLoadError = error;
+      // Use mock implementation
       this.activeWin = this.createMockActiveWin();
+      this.activeWinLoaded = true;
     }
   }
 
   createMockActiveWin() {
     // Mock implementation for when active-win is not available
+    console.log('Using mock active-win implementation');
     return async () => {
       return {
-        title: 'Unknown Window',
+        title: 'TimeTracker Desktop',
         owner: {
-          name: 'Unknown Application',
-          path: '',
-          processId: 0
+          name: 'TimeTracker',
+          path: process.execPath,
+          processId: process.pid
         },
         bounds: { x: 0, y: 0, width: 1920, height: 1080 },
         memoryUsage: 0
       };
     };
+  }
+
+  // Wait for active-win to be loaded
+  async waitForActiveWin(timeout = 5000) {
+    const startTime = Date.now();
+    while (!this.activeWinLoaded && Date.now() - startTime < timeout) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return this.activeWinLoaded;
   }
 
   // Categorization methods
@@ -335,8 +353,11 @@ class ActivityTracker {
     this.categories[category.id] = category;
   }
 
-  start() {
+  async start() {
     if (this.isTracking) return;
+    
+    // Wait for active-win to load
+    await this.waitForActiveWin();
     
     this.isTracking = true;
     this.isPaused = false;
