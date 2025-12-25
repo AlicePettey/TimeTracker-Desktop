@@ -5,7 +5,7 @@
   "main": "main.js",
   "author": {
     "name": "TimeTracker",
-    "email": "support@timetracker.app"
+    "email": "support@ndsenterprises.llc"
   },
   "license": "MIT",
   "homepage": "https://github.com/timetracker/timetracker-desktop",
@@ -149,7 +149,7 @@
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
       "installerHeaderIcon": "assets/icon.ico",
-      "license": "LICENSE.txt",
+      "license": "assets/LICENSE.txt",
       "deleteAppDataOnUninstall": false
     },
     "dmg": {
