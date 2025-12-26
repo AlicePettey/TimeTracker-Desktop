@@ -37,7 +37,7 @@
     "uuid": "^9.0.0"
   },
   "devDependencies": {
-    "electron": "28.2.0",
+    "electron": "^28.2.0",
     "electron-builder": "^24.13.3",
     "rimraf": "^5.0.5"
   },
@@ -68,12 +68,6 @@
       "!**/{npm-debug.log,yarn.lock,.yarn-integrity,.yarn-metadata.json}",
       "!dist/**/*",
       "!scripts/**/*"
-    ],
-      "extraResources": [
-           {
-       "from": "node_modules/electron/dist/ffmpeg.dll",
-       "to": "../ffmpeg.dll"
-      }
     ],
     "asarUnpack": [
       "**/*.node",

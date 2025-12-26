@@ -24,7 +24,6 @@ interface DbTask {
   name: string;
   created_at: string;
 }
-
 interface DbActivity {
   id: string;
   user_id: string;
@@ -37,8 +36,13 @@ interface DbActivity {
   duration: number;
   is_coded: boolean;
   is_idle: boolean;
+  source?: string;
+  device_id?: string;
+  category_id?: string;
+  synced_at?: string;
   created_at: string;
 }
+
 
 export const useTimeTracker = (user: User | null = null) => {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -897,6 +901,40 @@ export const useTimeTracker = (user: User | null = null) => {
     setIsTracking(prev => !prev);
   }, []);
 
+  // Refresh activities from database (useful after desktop sync)
+  const refreshActivities = useCallback(async () => {
+    if (!user) return;
+    
+    setIsSyncing(true);
+    try {
+      const { data: activitiesData, error: activitiesError } = await supabase
+        .from('activities')
+        .select('*')
+        .order('start_time', { ascending: false });
+
+      if (activitiesError) throw activitiesError;
+
+      const transformedActivities: Activity[] = (activitiesData || []).map((a: DbActivity) => ({
+        id: a.id,
+        applicationName: a.application_name,
+        windowTitle: a.window_title,
+        startTime: new Date(a.start_time),
+        endTime: new Date(a.end_time),
+        duration: a.duration,
+        projectId: a.project_id || undefined,
+        taskId: a.task_id || undefined,
+        isCoded: a.is_coded,
+        isIdle: a.is_idle
+      }));
+
+      setActivities(transformedActivities);
+    } catch (error) {
+      console.error('Error refreshing activities:', error);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [user]);
+
   return {
     projects,
     activities,
@@ -923,6 +961,8 @@ export const useTimeTracker = (user: User | null = null) => {
     getSummaryStats,
     exportToCSV,
     toggleTracking,
+    refreshActivities,
     migrateLocalDataToDatabase
   };
 };
+

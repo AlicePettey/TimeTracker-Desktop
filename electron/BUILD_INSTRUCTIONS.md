@@ -156,16 +156,16 @@ npm --version   # Should be 9+
 After a successful build, find your installers in the `dist` folder:
 
 ### Windows
-- `TimeTrackerDesktop-1.0.0-win-x64.exe` - NSIS installer
-- `TimeTrackerDesktop-1.0.0-win-x64-portable.exe` - Portable version
+- `TimeTracker Desktop-1.0.0-win-x64.exe` - NSIS installer
+- `TimeTracker Desktop-1.0.0-win-x64-portable.exe` - Portable version
 
 ### macOS
-- `TimeTrackerDesktop-1.0.0-mac-universal.dmg` - Disk image
-- `TimeTrackerDesktop-1.0.0-mac-universal.zip` - Zipped app
+- `TimeTracker Desktop-1.0.0-mac-universal.dmg` - Disk image
+- `TimeTracker Desktop-1.0.0-mac-universal.zip` - Zipped app
 
 ### Linux
-- `TimeTrackerDesktop-1.0.0-x64.AppImage` - Universal Linux app
-- `timetrackerdesktop_1.0.0_amd64.deb` - Debian/Ubuntu package
+- `TimeTracker Desktop-1.0.0-x64.AppImage` - Universal Linux app
+- `timetracker-desktop_1.0.0_amd64.deb` - Debian/Ubuntu package
 
 ## Development
 
