@@ -37,7 +37,7 @@
     "uuid": "^9.0.0"
   },
   "devDependencies": {
-    "electron": "^28.2.0",
+    "electron": "28.2.0",
     "electron-builder": "^24.13.3",
     "rimraf": "^5.0.5"
   },
@@ -69,22 +69,10 @@
       "!dist/**/*",
       "!scripts/**/*"
     ],
-      "extraFiles": [
-      {
-       "from": "node_modules/electron/dist/icudtl.dat",
-       "to": "."
-      },
-      {
-        "from": "node_modules/electron/dist/snapshot_blob.bin",
-        "to": "."
-      },
-      {
-        "from": "node_modules/electron/dist/v8_context_snapshot.bin",
-        "to": "."
-      },
-      {
+      "extraResources": [
+           {
        "from": "node_modules/electron/dist/ffmpeg.dll",
-       "to": "."
+       "to": "../ffmpeg.dll"
       }
     ],
     "asarUnpack": [
