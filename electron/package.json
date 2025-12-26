@@ -1,10 +1,10 @@
 {
   "name": "timetracker-desktop",
-  "version": "1.0.0",
+  "version": "1.6.4",
   "description": "TimeTracker Desktop Companion - System-wide activity tracking",
   "main": "main.js",
   "author": {
-    "name": "TimeTracker",
+    "name": "NDS Enterprises LLC",
     "email": "support@ndsenterprises.llc"
   },
   "license": "MIT",
