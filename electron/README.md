@@ -30,7 +30,7 @@ Download the latest release for your platform from [GitHub Releases](https://git
 
 ```bash
 # Clone the repository
-git clone https://github.com/alicepettey/timetracker-desktop.git
+git clone https://github.com/timetracker/timetracker-desktop.git
 cd timetracker-desktop/electron
 
 # Install dependencies

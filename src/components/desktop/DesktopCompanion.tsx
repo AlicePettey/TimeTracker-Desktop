@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Activity } from '@/types';
-import { supabase } from '@/lib/supabase';
+import { supabase, supabaseUrl } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
+
 
 interface DesktopActivity extends Activity {
   source: 'desktop' | 'browser';
@@ -793,17 +794,21 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                   <span className="text-blue-600 dark:text-blue-400 font-semibold text-sm">2</span>
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-medium text-gray-900 dark:text-white mb-2">Copy Web App URL</h3>
+                  <h3 className="font-medium text-gray-900 dark:text-white mb-2">Copy Sync URL</h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                    The desktop app needs this URL to sync data
+                    The desktop app needs this URL to sync data to the cloud
                   </p>
                   <div className="flex items-center gap-2">
-                    <div className="flex-1 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg font-mono text-sm text-gray-600 dark:text-gray-300 truncate">
-                      {window.location.origin}
+                    <div className="flex-1 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg font-mono text-xs text-gray-600 dark:text-gray-300 break-all">
+                      {supabaseUrl}
                     </div>
                     <button
-                      onClick={copyUrl}
-                      className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                      onClick={() => {
+                        navigator.clipboard.writeText(supabaseUrl);
+                        setCopiedUrl(true);
+                        setTimeout(() => setCopiedUrl(false), 2000);
+                      }}
+                      className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex-shrink-0"
                     >
                       {copiedUrl ? (
                         <svg className="w-5 h-5 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -817,8 +822,18 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                       )}
                     </button>
                   </div>
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 flex items-center gap-1">
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="8" x2="12" y2="12" />
+                      <line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    This is the server URL, not the web app URL
+                  </p>
                 </div>
               </div>
+
+
 
               {/* Step 3 */}
               <div className="flex gap-4">
