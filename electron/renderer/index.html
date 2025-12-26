@@ -260,55 +260,134 @@
       border-radius: 3px;
     }
 
-    /* Activity List */
+    /* Activity List with Collapsible Groups */
     .activity-list {
       display: flex;
       flex-direction: column;
       gap: 8px;
     }
 
-    .activity-item {
-      padding: 12px;
+    .activity-group {
       background: var(--bg-secondary);
       border-radius: 8px;
       border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .activity-group-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .activity-group-header:hover {
+      background: var(--bg-tertiary);
+    }
+
+    .activity-group-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .activity-group-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-tertiary);
+    }
+
+    .activity-group-icon svg {
+      width: 16px;
+      height: 16px;
+      color: var(--text-secondary);
+    }
+
+    .activity-group-name {
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .activity-group-count {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    .activity-group-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .activity-group-duration {
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 500;
+    }
+
+    .activity-group-chevron {
+      width: 16px;
+      height: 16px;
+      color: var(--text-muted);
+      transition: transform 0.2s;
+    }
+
+    .activity-group.expanded .activity-group-chevron {
+      transform: rotate(180deg);
+    }
+
+    .activity-group-items {
+      display: none;
+      border-top: 1px solid var(--border);
+    }
+
+    .activity-group.expanded .activity-group-items {
+      display: block;
+    }
+
+    .activity-item {
+      padding: 10px 12px 10px 54px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .activity-item:last-child {
+      border-bottom: none;
     }
 
     .activity-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
     }
 
-    .activity-app {
-      font-size: 13px;
-      font-weight: 500;
-    }
-
-    .activity-duration {
-      font-size: 12px;
-      color: var(--accent);
-      font-weight: 500;
-    }
-
-    .activity-title {
-      font-size: 11px;
-      color: var(--text-secondary);
-      white-space: nowrap;
     .activity-title {
       font-size: 11px;
       color: var(--text-secondary);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      flex: 1;
+      margin-right: 8px;
+    }
+
+    .activity-duration {
+      font-size: 11px;
+      color: var(--accent);
+      font-weight: 500;
     }
 
     .activity-meta {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-top: 6px;
+      margin-top: 4px;
     }
 
     .activity-time {
@@ -471,6 +550,44 @@
       width: 100%;
     }
 
+    /* Large Sync Button */
+    .btn-sync-large {
+      padding: 16px 24px;
+      font-size: 15px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: linear-gradient(135deg, var(--accent), #8b5cf6);
+      border-radius: 12px;
+      margin-top: 16px;
+    }
+
+    .btn-sync-large:hover {
+      background: linear-gradient(135deg, var(--accent-hover), #7c3aed);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+
+    .btn-sync-large:active {
+      transform: translateY(0);
+    }
+
+    .btn-sync-large svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    .btn-sync-large.syncing svg {
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
     /* Sync Status */
     .sync-status {
       padding: 12px;
@@ -509,6 +626,72 @@
     }
 
     .sync-info {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    /* Toast Notification */
+    .toast-container {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      pointer-events: none;
+    }
+
+    .toast {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 20px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.3s ease;
+      pointer-events: auto;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .toast.success {
+      border-color: var(--success);
+    }
+
+    .toast.success .toast-icon {
+      color: var(--success);
+    }
+
+    .toast.error {
+      border-color: var(--error);
+    }
+
+    .toast.error .toast-icon {
+      color: var(--error);
+    }
+
+    .toast-icon {
+      width: 20px;
+      height: 20px;
+    }
+
+    .toast-content {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .toast-title {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .toast-message {
       font-size: 11px;
       color: var(--text-secondary);
     }
@@ -582,9 +765,60 @@
     .version-info a:hover {
       text-decoration: underline;
     }
+
+    /* Quick Sync Button on Main Screen */
+    .quick-sync-container {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .btn-quick-sync {
+      width: 100%;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: linear-gradient(135deg, var(--accent), #8b5cf6);
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-quick-sync:hover {
+      background: linear-gradient(135deg, var(--accent-hover), #7c3aed);
+    }
+
+    .btn-quick-sync svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .btn-quick-sync.syncing svg {
+      animation: spin 1s linear infinite;
+    }
   </style>
 </head>
 <body>
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container">
+    <div class="toast" id="toast">
+      <svg class="toast-icon" id="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+        <polyline points="22 4 12 14.01 9 11.01"/>
+      </svg>
+      <div class="toast-content">
+        <span class="toast-title" id="toast-title">Success</span>
+        <span class="toast-message" id="toast-message">Operation completed</span>
+      </div>
+    </div>
+  </div>
+
   <!-- Custom Title Bar -->
   <div class="titlebar">
     <div class="titlebar-title">
@@ -628,6 +862,16 @@
         <div class="current-app-label">Currently Tracking</div>
         <div class="current-app-name" id="current-app-name">-</div>
         <div class="current-app-title" id="current-app-title">No activity detected</div>
+      </div>
+      <!-- Quick Sync Button -->
+      <div class="quick-sync-container">
+        <button class="btn-quick-sync" id="btn-quick-sync">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+            <polyline points="21 3 21 9 15 9"/>
+          </svg>
+          Sync to Web App
+        </button>
       </div>
     </div>
 
@@ -698,7 +942,11 @@
           <button class="btn btn-primary btn-block" id="btn-save-sync">Save & Connect</button>
         </div>
 
-        <button class="btn btn-secondary btn-block" id="btn-sync-now">
+        <button class="btn btn-primary btn-block btn-sync-large" id="btn-sync-now">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+            <polyline points="21 3 21 9 15 9"/>
+          </svg>
           Sync Now
         </button>
       </div>
@@ -774,7 +1022,7 @@
 
         <div class="version-info">
           <p>TimeTracker Desktop v<span id="app-version">1.0.0</span></p>
-          <p><a href="#" id="link-releases">View Release Notes</a></p>
+          <p><a href="https://github.com/AlicePettey/TimeTracker-Desktop/releases" id="link-releases" target="_blank">View Release Notes</a></p>
         </div>
       </div>
     </div>

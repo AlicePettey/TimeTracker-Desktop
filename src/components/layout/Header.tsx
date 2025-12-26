@@ -5,8 +5,7 @@ import {
   PlayIcon, 
   PauseIcon, 
   SunIcon, 
-  MoonIcon,
-  SettingsIcon
+  MoonIcon
 } from '@/components/ui/Icons';
 import { TabTrackerState } from '@/hooks/useTabTracker';
 
@@ -22,6 +21,7 @@ interface HeaderProps {
   isSyncing?: boolean;
   isTabTracking?: boolean;
   tabTrackerState?: TabTrackerState;
+  onSync?: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -35,15 +35,32 @@ const Header: React.FC<HeaderProps> = ({
   onSignOut,
   isSyncing = false,
   isTabTracking = false,
-  tabTrackerState
+  tabTrackerState,
+  onSync
 }) => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showSyncSuccess, setShowSyncSuccess] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // Show success message when sync completes
+  useEffect(() => {
+    if (!isSyncing && showSyncSuccess) {
+      const timer = setTimeout(() => setShowSyncSuccess(false), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [isSyncing, showSyncSuccess]);
+
+  const handleSync = () => {
+    if (onSync && !isSyncing) {
+      setShowSyncSuccess(true);
+      onSync();
+    }
+  };
 
   const getUserInitials = (user: User) => {
     const name = user.user_metadata?.full_name || user.email || '';
@@ -139,6 +156,16 @@ const Header: React.FC<HeaderProps> = ({
                 <span className="text-sm">Syncing...</span>
               </div>
             )}
+
+            {/* Sync Success Message */}
+            {showSyncSuccess && !isSyncing && (
+              <div className="flex items-center gap-2 text-green-600 dark:text-green-400 animate-fade-in">
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span className="text-sm">Synced!</span>
+              </div>
+            )}
           </div>
 
           {/* Right - Actions */}
@@ -152,13 +179,30 @@ const Header: React.FC<HeaderProps> = ({
               {isDarkMode ? <SunIcon size={20} /> : <MoonIcon size={20} />}
             </button>
             
-            {/* Settings */}
-            <button
-              className="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              title="Settings"
-            >
-              <SettingsIcon size={20} />
-            </button>
+            {/* Sync Button - Only show when user is logged in */}
+            {user && (
+              <button
+                onClick={handleSync}
+                disabled={isSyncing}
+                className={`p-2 rounded-lg transition-colors ${
+                  isSyncing 
+                    ? 'text-blue-500 bg-blue-50 dark:bg-blue-900/30' 
+                    : 'text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30'
+                }`}
+                title="Sync with Desktop App"
+              >
+                <svg 
+                  className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  strokeWidth="2"
+                >
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  <polyline points="21 3 21 9 15 9" />
+                </svg>
+              </button>
+            )}
 
             {/* Current Time */}
             <div className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg">

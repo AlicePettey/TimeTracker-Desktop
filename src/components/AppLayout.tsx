@@ -421,7 +421,9 @@ const AppLayout: React.FC = () => {
         isSyncing={isSyncing}
         isTabTracking={isTabTracking}
         tabTrackerState={tabTrackerState}
+        onSync={refreshActivities}
       />
+
       
       <div className="flex">
         <Sidebar

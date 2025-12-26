@@ -11,6 +11,8 @@ let activities = [];
 let settings = {};
 let isTracking = true;
 let updateStatus = null;
+let isSyncing = false;
+let expandedGroups = new Set();
 
 // DOM Elements
 const elements = {
@@ -46,6 +48,16 @@ const elements = {
   updateProgress: document.getElementById('update-progress'),
   updateProgressFill: document.getElementById('update-progress-fill'),
   updateActions: document.getElementById('update-actions'),
+
+  // Toast
+  toast: document.getElementById('toast'),
+  toastIcon: document.getElementById('toast-icon'),
+  toastTitle: document.getElementById('toast-title'),
+  toastMessage: document.getElementById('toast-message'),
+
+  // Sync buttons
+  btnSyncNow: document.getElementById('btn-sync-now'),
+  btnQuickSync: document.getElementById('btn-quick-sync'),
 };
 
 // Initialize
@@ -85,7 +97,8 @@ function setupEventListeners() {
   
   // Sync buttons
   document.getElementById('btn-save-sync').addEventListener('click', saveSyncSettings);
-  document.getElementById('btn-sync-now').addEventListener('click', syncNow);
+  elements.btnSyncNow.addEventListener('click', syncNow);
+  elements.btnQuickSync.addEventListener('click', syncNow);
   
   // Settings toggles
   elements.toggleTracking.addEventListener('click', toggleTracking);
@@ -101,11 +114,10 @@ function setupEventListeners() {
   document.getElementById('btn-download-update').addEventListener('click', downloadUpdate);
   document.getElementById('btn-skip-update').addEventListener('click', skipUpdate);
   
-  // Release notes link
-  document.getElementById('link-releases').addEventListener('click', async (e) => {
+  // Release notes link - updated URL
+  document.getElementById('link-releases').addEventListener('click', (e) => {
     e.preventDefault();
-    const url = await window.electronAPI.getReleaseUrl();
-    window.electronAPI.openExternal(url);
+    window.electronAPI.openExternal('https://github.com/AlicePettey/TimeTracker-Desktop/releases');
   });
 }
 
@@ -134,10 +146,13 @@ function setupIpcListeners() {
   
   // Sync completed
   window.electronAPI.onSyncCompleted((result) => {
+    isSyncing = false;
+    updateSyncButtonState();
+    
     if (result.success) {
-      showNotification('Sync completed', `${result.synced} activities synced`);
+      showToast('success', 'Sync Complete', `${result.synced} activities synced successfully`);
     } else {
-      showNotification('Sync failed', result.error);
+      showToast('error', 'Sync Failed', result.error || 'Unknown error occurred');
     }
     loadSyncStatus();
   });
@@ -146,6 +161,82 @@ function setupIpcListeners() {
   window.electronAPI.onUpdateStatus((data) => {
     handleUpdateStatus(data);
   });
+}
+
+// Toast notification system
+function showToast(type, title, message) {
+  const toast = elements.toast;
+  const toastIcon = elements.toastIcon;
+  
+  // Set type class
+  toast.className = 'toast ' + type;
+  
+  // Set icon based on type
+  if (type === 'success') {
+    toastIcon.innerHTML = `
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+      <polyline points="22 4 12 14.01 9 11.01"/>
+    `;
+  } else if (type === 'error') {
+    toastIcon.innerHTML = `
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="15" y1="9" x2="9" y2="15"/>
+      <line x1="9" y1="9" x2="15" y2="15"/>
+    `;
+  }
+  
+  // Set content
+  elements.toastTitle.textContent = title;
+  elements.toastMessage.textContent = message;
+  
+  // Show toast
+  setTimeout(() => toast.classList.add('show'), 10);
+  
+  // Hide after 4 seconds
+  setTimeout(() => {
+    toast.classList.remove('show');
+  }, 4000);
+}
+
+// Update sync button state
+function updateSyncButtonState() {
+  const syncingClass = 'syncing';
+  
+  if (isSyncing) {
+    elements.btnSyncNow.classList.add(syncingClass);
+    elements.btnQuickSync.classList.add(syncingClass);
+    elements.btnSyncNow.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+        <polyline points="21 3 21 9 15 9"/>
+      </svg>
+      Syncing...
+    `;
+    elements.btnQuickSync.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+        <polyline points="21 3 21 9 15 9"/>
+      </svg>
+      Syncing...
+    `;
+  } else {
+    elements.btnSyncNow.classList.remove(syncingClass);
+    elements.btnQuickSync.classList.remove(syncingClass);
+    elements.btnSyncNow.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+        <polyline points="21 3 21 9 15 9"/>
+      </svg>
+      Sync Now
+    `;
+    elements.btnQuickSync.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+        <polyline points="21 3 21 9 15 9"/>
+      </svg>
+      Sync to Web App
+    `;
+  }
 }
 
 // Tab switching
@@ -185,7 +276,7 @@ async function loadActivities() {
   renderActivities();
 }
 
-// Render activities list with categories
+// Render activities list with collapsible groups
 function renderActivities() {
   if (activities.length === 0) {
     elements.activityList.innerHTML = `
@@ -201,27 +292,83 @@ function renderActivities() {
     return;
   }
   
-  elements.activityList.innerHTML = activities.slice(0, 50).map(activity => {
-    const categoryColor = getCategoryColor(activity.categoryId);
-    const categoryName = getCategoryName(activity.categoryId);
+  // Group activities by app name
+  const groupedActivities = {};
+  activities.slice(0, 100).forEach(activity => {
+    const appName = activity.appName || activity.applicationName || 'Unknown';
+    if (!groupedActivities[appName]) {
+      groupedActivities[appName] = {
+        activities: [],
+        totalDuration: 0,
+        categoryId: activity.categoryId
+      };
+    }
+    groupedActivities[appName].activities.push(activity);
+    groupedActivities[appName].totalDuration += activity.duration || 0;
+  });
+  
+  // Render grouped activities
+  elements.activityList.innerHTML = Object.entries(groupedActivities).map(([appName, group]) => {
+    const isExpanded = expandedGroups.has(appName);
+    const categoryColor = getCategoryColor(group.categoryId);
+    const categoryName = getCategoryName(group.categoryId);
     
     return `
-      <div class="activity-item">
-        <div class="activity-header">
-          <span class="activity-app">${escapeHtml(activity.appName || activity.applicationName || 'Unknown')}</span>
-          <span class="activity-duration">${formatDuration(activity.duration)}</span>
+      <div class="activity-group ${isExpanded ? 'expanded' : ''}" data-app="${escapeHtml(appName)}">
+        <div class="activity-group-header" onclick="toggleActivityGroup('${escapeHtml(appName)}')">
+          <div class="activity-group-info">
+            <div class="activity-group-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                <line x1="8" y1="21" x2="16" y2="21"/>
+                <line x1="12" y1="17" x2="12" y2="21"/>
+              </svg>
+            </div>
+            <div>
+              <div class="activity-group-name">${escapeHtml(appName)}</div>
+              <div class="activity-group-count">${group.activities.length} session${group.activities.length !== 1 ? 's' : ''}</div>
+            </div>
+          </div>
+          <div class="activity-group-right">
+            <span class="activity-category" style="background-color: ${categoryColor}20; color: ${categoryColor}; border: 1px solid ${categoryColor}40;">
+              ${categoryName}
+            </span>
+            <span class="activity-group-duration">${formatDuration(group.totalDuration)}</span>
+            <svg class="activity-group-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </div>
         </div>
-        <div class="activity-title">${escapeHtml(activity.windowTitle || '-')}</div>
-        <div class="activity-meta">
-          <span class="activity-time">${formatTime(activity.startTime)}</span>
-          <span class="activity-category" style="background-color: ${categoryColor}20; color: ${categoryColor}; border: 1px solid ${categoryColor}40;">
-            ${categoryName}
-          </span>
+        <div class="activity-group-items">
+          ${group.activities.map(activity => `
+            <div class="activity-item">
+              <div class="activity-header">
+                <span class="activity-title">${escapeHtml(activity.windowTitle || '-')}</span>
+                <span class="activity-duration">${formatDuration(activity.duration)}</span>
+              </div>
+              <div class="activity-meta">
+                <span class="activity-time">${formatTime(activity.startTime)}</span>
+              </div>
+            </div>
+          `).join('')}
         </div>
       </div>
     `;
   }).join('');
 }
+
+// Toggle activity group expansion
+function toggleActivityGroup(appName) {
+  if (expandedGroups.has(appName)) {
+    expandedGroups.delete(appName);
+  } else {
+    expandedGroups.add(appName);
+  }
+  renderActivities();
+}
+
+// Make toggleActivityGroup available globally
+window.toggleActivityGroup = toggleActivityGroup;
 
 // Category helpers
 const CATEGORY_COLORS = {
@@ -368,15 +515,24 @@ async function saveSyncSettings() {
   });
   
   await loadSyncStatus();
-  showNotification('Settings saved', 'Sync settings have been updated');
+  showToast('success', 'Settings Saved', 'Sync settings have been updated');
 }
 
 async function syncNow() {
+  if (isSyncing) return;
+  
+  isSyncing = true;
+  updateSyncButtonState();
+  
   const result = await window.electronAPI.syncActivities();
+  
+  isSyncing = false;
+  updateSyncButtonState();
+  
   if (result.success) {
-    showNotification('Sync completed', `${result.synced} activities synced`);
+    showToast('success', 'Sync Complete', `${result.synced} activities synced successfully`);
   } else {
-    showNotification('Sync failed', result.error);
+    showToast('error', 'Sync Failed', result.error || 'Unknown error occurred');
   }
   await loadSyncStatus();
 }
@@ -392,7 +548,9 @@ async function checkUpdateStatus() {
 async function checkForUpdates() {
   const result = await window.electronAPI.checkForUpdates();
   if (!result.success) {
-    showNotification('Update check failed', result.error);
+    showToast('error', 'Update Check Failed', result.error || 'Could not check for updates');
+  } else {
+    showToast('success', 'Up to Date', 'You are running the latest version');
   }
 }
 
@@ -424,9 +582,10 @@ function handleUpdateStatus(data) {
         <button class="btn btn-secondary" onclick="skipUpdate()">Later</button>
       `;
       elements.updateActions.style.display = 'flex';
+      showToast('success', 'Update Ready', 'Restart the app to install the update');
       break;
     case 'error':
-      showNotification('Update error', data.data.message);
+      showToast('error', 'Update Error', data.data.message);
       elements.updateBanner.style.display = 'none';
       break;
   }
@@ -468,12 +627,7 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-function showNotification(title, message) {
-  // Simple notification - could be enhanced with a toast system
-  console.log(`${title}: ${message}`);
-}
-
-// Make installUpdate available globally for onclick
+// Make functions available globally for onclick handlers
 window.installUpdate = installUpdate;
 window.skipUpdate = skipUpdate;
 
