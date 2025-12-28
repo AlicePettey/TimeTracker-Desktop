@@ -2,8 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 
 
 // Initialize database client
-const supabaseUrl = 'https://bnhfvcnubdjeovtsjeqy.databasepad.com';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjcwZjk3YWM1LTkzOWYtNDc5Mi1hNGY0LTk3MTk0NTNiYTcwYiJ9.eyJwcm9qZWN0SWQiOiJibmhmdmNudWJkamVvdnRzamVxeSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzY2MDExODk5LCJleHAiOjIwODEzNzE4OTksImlzcyI6ImZhbW91cy5kYXRhYmFzZXBhZCIsImF1ZCI6ImZhbW91cy5jbGllbnRzIn0.8dB_oPE3r07MvBvVNLXIiQ433qxQdx932xXoFY7CdZM';
+const supabaseUrl = 'https://mfkvbauiirxvrsgkiztz.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ma3ZiYXVpaXJ4dnJzZ2tpenR6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY5MzUxNTAsImV4cCI6MjA4MjUxMTE1MH0.2H-8kPyZ1GVSBbvF8Ua8if1cdGTQSrTVTZm_PnPROEw';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Export the Supabase URL for desktop app sync configuration
