@@ -489,6 +489,22 @@ async function syncActivities() {
     });
 
     const result = await response.json();
+    const anonKey = settings.supabaseAnonKey || process.env.SUPABASE_ANON_KEY;
+    if (!anonKey) {
+        throw new Error('Supabase anon key is missing. Set settings.supabaseAnonKey or SUPABASE_ANON_KEY.');
+    }
+    const response = await fetch(`${syncUrl}/functions/v1/desktop-sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': anonKey,
+        'Authorization': `Bearer ${anonKey}`,
+        'x-sync-token': settings.syncToken,
+        'x-device-id': deviceId
+      },
+      body: JSON.stringify({ ... })
+      }
+    );
 
     if (response.ok && result.success) {
       // Clear synced activities from queue
@@ -527,6 +543,46 @@ async function syncActivities() {
     return { success: false, error: error.message };
   }
 }
+
+const anonKey = process.env.SUPABASE_ANON_KEY;
+if (!anonKey) {
+  throw new Error('Missing SUPABASE_ANON_KEY');
+}
+
+const response = await fetch(`${syncUrl}/functions/v1/desktop-sync`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+
+    // ✅ REQUIRED by Supabase Edge gateway
+    'apikey': anonKey,
+    'Authorization': `Bearer ${anonKey}`,
+
+    // ✅ Your desktop auth layer
+    'x-sync-token': settings.syncToken,
+    'x-device-id': deviceId
+  },
+  body: JSON.stringify({
+    activities: syncQueue.map(a => ({
+      applicationName: a.applicationName,
+      windowTitle: a.windowTitle || '',
+      startTime: a.startTime,
+      endTime: a.endTime,
+      duration: a.duration,
+      projectId: a.projectId || null,
+      taskId: a.taskId || null,
+      isCoded: a.isCoded || false,
+      isIdle: a.isIdle || false,
+      categoryId: a.categoryId || null,
+      categoryAutoAssigned: a.categoryAutoAssigned || false
+    })),
+    deviceId,
+    deviceName: require('os').hostname(),
+    platform: process.platform,
+    timestamp: new Date().toISOString(),
+    syncType: 'push'
+  })
+});
 
 
 function getDeviceId() {
