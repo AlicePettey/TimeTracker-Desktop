@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Activity } from '@/types';
 import { supabase, supabaseUrl } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
+import { generateSyncTokenLocal } from "@/lib/syncTokens";
+
 
 interface DesktopActivity extends Activity {
   source: 'desktop' | 'browser';
@@ -313,53 +315,45 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
   };
 
   // Generate a sync token using the edge function
-  const generateSyncToken = async () => {
-  if (!user || !session) {
-    setTokenError("Please sign in to generate a sync token");
-    return;
-  }
-
-  setIsGeneratingToken(true);
-  setTokenError(null);
-
-  try {
-    const tempDeviceId = `web-${Date.now().toString(36)}-${Math.random()
-      .toString(36)
-      .substring(2, 10)}`;
-
-    const { data, error } = await supabase.functions.invoke("generate-sync-token", {
-      body: {
-        deviceId: tempDeviceId,
-        deviceName: "Desktop App",
-        platform: "win32",
-      },
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-      },
-    });
-
-    if (error) throw error;
-
-    if (data?.token) {
-      setSyncToken(data.token);
-
-      const { data: devices } = await supabase
-        .from("sync_tokens")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("is_revoked", false)
-        .order("last_used_at", { ascending: false });
-
-      setConnectedDevices(devices || []);
-    } else {
-      throw new Error(data?.error || "Failed to generate token");
+    const generateSyncToken = async () => {
+    if (!user) {
+      setTokenError("Please sign in to generate a sync token");
+      return;
     }
-  } catch (err: any) {
-    console.error("Failed to generate sync token:", err);
-    setTokenError(err?.message || "Failed to generate sync token");
-  } finally {
-    setIsGeneratingToken(false);
-  }
+
+    setIsGeneratingToken(true);
+    setTokenError(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("generate-sync-token", {
+        body: {}, // keep empty unless your edge function actually uses fields
+      });
+
+      if (error) throw error;
+
+      if (data?.token) {
+        setSyncToken(data.token);
+
+      // refresh device list (this query must match your actual schema)
+        const { data: devices, error: devicesErr } = await supabase
+          .from("sync_tokens")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("last_used_at", { ascending: false })
+          .order("created_at", { ascending: false });
+
+        if (devicesErr) throw devicesErr;
+        setConnectedDevices((devices || []) as ConnectedDevice[]);
+      } else {
+        throw new Error(data?.error || "Failed to generate token");
+      }
+    } catch (err: any) {
+      console.error("Failed to generate sync token:", err);
+      setTokenError(err?.message || "Failed to generate sync token");
+    } finally {
+      setIsGeneratingToken(false);
+    }
+  };
 };
 
 

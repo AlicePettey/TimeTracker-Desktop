@@ -51,27 +51,15 @@ Deno.serve(async (req) => {
     const jwt = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!jwt) return json(401, { error: "Missing bearer token" });
 
-    // Admin client (service role) – validate user via JWT
-    const admin = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    // Service-role client; validate the caller via their JWT
+    const admin = createClient(supabaseUrl, serviceKey);
 
     const { data: userResp, error: userErr } = await admin.auth.getUser(jwt);
     if (userErr || !userResp?.user) {
-      return json(401, { error: "Invalid session token", detail: userErr?.message ?? null });
+      return json(401, { error: userErr?.message ?? "Invalid session token" });
     }
 
     const userId = userResp.user.id;
-
-    const body = await req.json().catch(() => ({}));
-    const deviceId =
-      typeof body?.deviceId === "string" && body.deviceId.trim() ? body.deviceId.trim() : null;
-    const deviceName =
-      typeof body?.deviceName === "string" && body.deviceName.trim()
-        ? body.deviceName.trim()
-        : "Desktop App";
-    const platform =
-      typeof body?.platform === "string" && body.platform.trim() ? body.platform.trim() : "unknown";
 
     const token = randomToken(32);
     const tokenHash = await sha256(token);
@@ -81,16 +69,11 @@ Deno.serve(async (req) => {
       user_id: userId,
       token_hash: tokenHash,
       expires_at: expiresAt,
-      device_id: deviceId,
-      device_name: deviceName,
-      platform,
-      last_used_at: new Date().toISOString(),
-      is_revoked: false,
     });
 
     if (insertErr) return json(500, { error: insertErr.message });
 
-    return json(200, { success: true, token, expires_at: expiresAt });
+    return json(200, { token, expires_at: expiresAt });
   } catch (e) {
     return json(500, { error: String(e) });
   }
