@@ -13,3 +13,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     storageKey: "timetracker-auth",
   },
 });
+
+// TEMP DEBUG (remove after)
+;(window as any).__sb = supabase;
