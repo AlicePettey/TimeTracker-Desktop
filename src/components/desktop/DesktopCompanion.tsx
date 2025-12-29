@@ -1,31 +1,39 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Activity } from '@/types';
 import { supabase, supabaseUrl } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
-
 
 interface DesktopActivity extends Activity {
   source: 'desktop' | 'browser';
   processPath?: string;
 }
 
-interface SyncConfig {
-  enabled: boolean;
-  deviceId: string;
-  deviceName: string;
-  lastSync: Date | null;
-  pendingCount: number;
-  platform?: 'win32' | 'darwin' | 'linux';
-}
-
+/**
+ * NOTE:
+ * Your current generate-sync-token edge function returns:
+ *   { token: string, expires_at: string }
+ * and does NOT require any body fields.
+ *
+ * This UI supports both:
+ *  - token-only rows (minimal schema)
+ *  - device-aware rows (device_id/device_name/platform/last_used_at)
+ * by treating those fields as optional and providing fallbacks.
+ */
 interface ConnectedDevice {
   id: string;
-  device_id: string;
-  device_name: string;
-  platform: 'win32' | 'darwin' | 'linux';
-  last_used_at: string;
-  created_at: string;
-  is_revoked: boolean;
+
+  user_id?: string;
+
+  // Optional metadata (may not exist depending on your schema + edge function)
+  device_id?: string | null;
+  device_name?: string | null;
+  platform?: 'win32' | 'darwin' | 'linux' | null;
+
+  // Timestamps / status
+  last_used_at?: string | null;
+  created_at?: string | null;
+  expires_at?: string | null;
+  is_revoked?: boolean | null;
 }
 
 interface SyncSettings {
@@ -41,8 +49,7 @@ interface DesktopCompanionProps {
   userId?: string;
 }
 
-// GitHub repository info - UPDATE THESE TO YOUR ACTUAL REPO
-// To configure: Replace 'your-username' and 'your-repo' with your actual GitHub username and repository name
+// GitHub repository info
 const GITHUB_OWNER = 'AlicePettey';
 const GITHUB_REPO = 'TimeTracker-Desktop';
 const RELEASES_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases`;
@@ -68,28 +75,55 @@ interface Release {
 
 const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities, userId }) => {
   const { user, session } = useAuth();
+
   const [syncToken, setSyncToken] = useState<string>('');
   const [connectedDevices, setConnectedDevices] = useState<ConnectedDevice[]>([]);
   const [isGeneratingToken, setIsGeneratingToken] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
+
   const [activeTab, setActiveTab] = useState<'download' | 'connect' | 'devices' | 'settings'>('download');
+
   const [latestRelease, setLatestRelease] = useState<Release | null>(null);
   const [isLoadingRelease, setIsLoadingRelease] = useState(true);
   const [releaseError, setReleaseError] = useState<string | null>(null);
+
   const [isLoadingDevices, setIsLoadingDevices] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
-  
-  // Sync settings state
+
+  // Sync settings
   const [syncSettings, setSyncSettings] = useState<SyncSettings>({
     syncInterval: 15,
     syncOnClose: true,
     syncOnIdle: true,
     autoSyncEnabled: true,
-    syncOnStartup: true
+    syncOnStartup: true,
   });
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
+
+  const effectiveUserId = useMemo(() => user?.id ?? userId, [user?.id, userId]);
+
+  const formatDateTime = (iso?: string | null) => {
+    if (!iso) return 'Never';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return 'Never';
+    return d.toLocaleString();
+  };
+
+  const formatDate = (iso?: string | null) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleDateString();
+  };
+
+  const platformLabel = (platform?: ConnectedDevice['platform'] | null) => {
+    if (platform === 'win32') return 'Windows';
+    if (platform === 'darwin') return 'macOS';
+    if (platform === 'linux') return 'Linux';
+    return 'Device';
+  };
 
   // Fetch latest release from GitHub
   useEffect(() => {
@@ -99,16 +133,24 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
         setReleaseError('Repository not configured');
         return;
       }
-      
+
       try {
         setIsLoadingRelease(true);
         setReleaseError(null);
-        const response = await fetch(LATEST_RELEASE_API);
+
+        const response = await fetch(LATEST_RELEASE_API, {
+          headers: {
+            Accept: 'application/vnd.github+json',
+          },
+        });
+
         if (response.ok) {
           const data = await response.json();
           setLatestRelease(data);
         } else if (response.status === 404) {
           setReleaseError('No releases found. The desktop app is coming soon!');
+        } else if (response.status === 403) {
+          setReleaseError('GitHub rate limit reached. Please try again later.');
         } else {
           setReleaseError('Unable to fetch releases. Please try again later.');
         }
@@ -123,22 +165,23 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
     fetchLatestRelease();
   }, []);
 
-  // Fetch connected devices
+  // Fetch connected devices (tokens)
   useEffect(() => {
     const fetchConnectedDevices = async () => {
-      if (!user) return;
-      
+      if (!effectiveUserId) return;
+
       setIsLoadingDevices(true);
       try {
         const { data, error } = await supabase
           .from('sync_tokens')
           .select('*')
-          .eq('user_id', user.id)
+          .eq('user_id', effectiveUserId)
           .eq('is_revoked', false)
-          .order('last_used_at', { ascending: false });
+          .order('last_used_at', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false });
 
         if (error) throw error;
-        setConnectedDevices(data || []);
+        setConnectedDevices((data || []) as ConnectedDevice[]);
       } catch (error) {
         console.error('Failed to fetch connected devices:', error);
       } finally {
@@ -147,22 +190,22 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
     };
 
     fetchConnectedDevices();
-  }, [user]);
+  }, [effectiveUserId]);
 
   // Fetch sync settings from database
   useEffect(() => {
     const fetchSyncSettings = async () => {
-      if (!user) return;
-      
+      if (!effectiveUserId) return;
+
       try {
         const { data, error } = await supabase
           .from('user_sync_settings')
           .select('*')
-          .eq('user_id', user.id)
+          .eq('user_id', effectiveUserId)
           .single();
 
-        if (error && error.code !== 'PGRST116') {
-          // PGRST116 = no rows returned, which is fine for new users
+        if (error && (error as any).code !== 'PGRST116') {
+          // PGRST116 = no rows returned (new users)
           console.error('Failed to fetch sync settings:', error);
           return;
         }
@@ -170,10 +213,10 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
         if (data) {
           setSyncSettings({
             syncInterval: data.sync_interval as 5 | 15 | 30,
-            syncOnClose: data.sync_on_close,
-            syncOnIdle: data.sync_on_idle,
-            autoSyncEnabled: data.auto_sync_enabled,
-            syncOnStartup: data.sync_on_startup
+            syncOnClose: Boolean(data.sync_on_close),
+            syncOnIdle: Boolean(data.sync_on_idle),
+            autoSyncEnabled: Boolean(data.auto_sync_enabled),
+            syncOnStartup: Boolean(data.sync_on_startup),
           });
         }
       } catch (error) {
@@ -182,20 +225,29 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
     };
 
     fetchSyncSettings();
-  }, [user]);
+  }, [effectiveUserId]);
 
   // Copy token to clipboard
-  const copyToken = () => {
-    navigator.clipboard.writeText(syncToken);
-    setCopiedToken(true);
-    setTimeout(() => setCopiedToken(false), 2000);
+  const copyToken = async () => {
+    if (!syncToken) return;
+    try {
+      await navigator.clipboard.writeText(syncToken);
+      setCopiedToken(true);
+      setTimeout(() => setCopiedToken(false), 2000);
+    } catch (e) {
+      console.error('Failed to copy token:', e);
+    }
   };
 
-  // Copy URL to clipboard
-  const copyUrl = () => {
-    navigator.clipboard.writeText(window.location.origin);
-    setCopiedUrl(true);
-    setTimeout(() => setCopiedUrl(false), 2000);
+  // Copy Supabase URL to clipboard
+  const copySupabaseUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(supabaseUrl);
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 2000);
+    } catch (e) {
+      console.error('Failed to copy URL:', e);
+    }
   };
 
   // Helper to find download URL for specific platform
@@ -206,8 +258,10 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
       'windows-exe': [/\.exe$/i, /setup.*\.exe$/i, /installer.*\.exe$/i],
       'windows-portable': [/portable.*\.exe$/i],
       'windows-msi': [/\.msi$/i],
+
       'mac-dmg': [/\.dmg$/i],
-      'mac-zip': [/darwin.*\.zip$/i, /mac.*\.zip$/i],
+      'mac-zip': [/darwin.*\.zip$/i, /mac.*\.zip$/i, /\.zip$/i],
+
       'linux-appimage': [/\.AppImage$/i],
       'linux-deb': [/\.deb$/i],
       'linux-rpm': [/\.rpm$/i],
@@ -217,7 +271,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
     const assetPatterns = patterns[key] || [];
 
     for (const pattern of assetPatterns) {
-      const asset = latestRelease.assets.find(a => pattern.test(a.name));
+      const asset = latestRelease.assets?.find((a) => pattern.test(a.name));
       if (asset) return asset.browser_download_url;
     }
 
@@ -235,18 +289,23 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
     if (!latestRelease) return '';
 
     const patterns: Record<string, RegExp[]> = {
-      'windows-exe': [/\.exe$/i, /setup.*\.exe$/i],
+      'windows-exe': [/\.exe$/i, /setup.*\.exe$/i, /installer.*\.exe$/i],
       'windows-portable': [/portable.*\.exe$/i],
+      'windows-msi': [/\.msi$/i],
+
       'mac-dmg': [/\.dmg$/i],
+      'mac-zip': [/\.zip$/i],
+
       'linux-appimage': [/\.AppImage$/i],
       'linux-deb': [/\.deb$/i],
+      'linux-rpm': [/\.rpm$/i],
     };
 
     const key = type ? `${platform}-${type}` : platform;
     const assetPatterns = patterns[key] || [];
 
     for (const pattern of assetPatterns) {
-      const asset = latestRelease.assets.find(a => pattern.test(a.name));
+      const asset = latestRelease.assets?.find((a) => pattern.test(a.name));
       if (asset) return formatSize(asset.size);
     }
 
@@ -264,55 +323,59 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
     setTokenError(null);
 
     try {
-      // Generate a temporary device ID for this token request
-      const tempDeviceId = `web-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 10)}`;
-      
+      // Optional metadata (your current edge function ignores body fields; safe to send anyway)
+      const tempDeviceId = `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
       const { data, error } = await supabase.functions.invoke('generate-sync-token', {
         body: {
           deviceId: tempDeviceId,
           deviceName: 'Desktop App',
-          platform: 'win32' // Default, will be updated when desktop app connects
-        }
+          platform: 'win32',
+        },
       });
 
       if (error) throw error;
 
-      if (data?.success && data?.token) {
-        setSyncToken(data.token);
-        // Refresh connected devices
-        const { data: devices } = await supabase
+      // Your edge function returns { token, expires_at }
+      if (data?.token) {
+        setSyncToken(String(data.token));
+
+        // Refresh device/token list
+        const { data: devices, error: devicesErr } = await supabase
           .from('sync_tokens')
           .select('*')
           .eq('user_id', user.id)
           .eq('is_revoked', false)
-          .order('last_used_at', { ascending: false });
-        setConnectedDevices(devices || []);
+          .order('last_used_at', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false });
+
+        if (devicesErr) throw devicesErr;
+        setConnectedDevices((devices || []) as ConnectedDevice[]);
       } else {
-        throw new Error(data?.message || 'Failed to generate token');
+        throw new Error(data?.error || 'Failed to generate token');
       }
     } catch (error: any) {
       console.error('Failed to generate sync token:', error);
-      setTokenError(error.message || 'Failed to generate sync token');
+      setTokenError(error?.message || 'Failed to generate sync token');
     } finally {
       setIsGeneratingToken(false);
     }
   };
 
   // Revoke a device token
-  const revokeDevice = async (deviceId: string) => {
-    if (!user) return;
+  const revokeDevice = async (tokenRowId: string) => {
+    if (!effectiveUserId) return;
 
     try {
       const { error } = await supabase
         .from('sync_tokens')
         .update({ is_revoked: true })
-        .eq('id', deviceId)
-        .eq('user_id', user.id);
+        .eq('id', tokenRowId)
+        .eq('user_id', effectiveUserId);
 
       if (error) throw error;
 
-      // Refresh devices list
-      setConnectedDevices(prev => prev.filter(d => d.id !== deviceId));
+      setConnectedDevices((prev) => prev.filter((d) => d.id !== tokenRowId));
     } catch (error) {
       console.error('Failed to revoke device:', error);
     }
@@ -320,7 +383,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
 
   // Save sync settings
   const saveSyncSettings = async () => {
-    if (!user) return;
+    if (!effectiveUserId) return;
 
     setIsSavingSettings(true);
     setSettingsSaved(false);
@@ -328,17 +391,18 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
     try {
       const { error } = await supabase
         .from('user_sync_settings')
-        .upsert({
-          user_id: user.id,
-          sync_interval: syncSettings.syncInterval,
-          sync_on_close: syncSettings.syncOnClose,
-          sync_on_idle: syncSettings.syncOnIdle,
-          auto_sync_enabled: syncSettings.autoSyncEnabled,
-          sync_on_startup: syncSettings.syncOnStartup,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'user_id'
-        });
+        .upsert(
+          {
+            user_id: effectiveUserId,
+            sync_interval: syncSettings.syncInterval,
+            sync_on_close: syncSettings.syncOnClose,
+            sync_on_idle: syncSettings.syncOnIdle,
+            auto_sync_enabled: syncSettings.autoSyncEnabled,
+            sync_on_startup: syncSettings.syncOnStartup,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id' }
+        );
 
       if (error) throw error;
 
@@ -351,9 +415,8 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
     }
   };
 
-
   const version = latestRelease?.tag_name?.replace('v', '') || '1.0.0';
-  const releaseDate = latestRelease?.published_at 
+  const releaseDate = latestRelease?.published_at
     ? new Date(latestRelease.published_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
     : 'December 2024';
 
@@ -376,7 +439,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
               <p className="text-white/80">System-wide activity tracking for Windows, Mac & Linux</p>
             </div>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
             <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
               <div className="flex items-center gap-3 mb-2">
@@ -416,33 +479,49 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
       {/* Tab Navigation */}
       <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
         {[
-          { id: 'download', label: 'Download', icon: (
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-          )},
-          { id: 'connect', label: 'Connect', icon: (
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-            </svg>
-          )},
-          { id: 'devices', label: 'Devices', icon: (
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-              <line x1="8" y1="21" x2="16" y2="21" />
-              <line x1="12" y1="17" x2="12" y2="21" />
-            </svg>
-          )},
-          { id: 'settings', label: 'Sync Settings', icon: (
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          )}
-        ].map(tab => (
+          {
+            id: 'download',
+            label: 'Download',
+            icon: (
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            ),
+          },
+          {
+            id: 'connect',
+            label: 'Connect',
+            icon: (
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+              </svg>
+            ),
+          },
+          {
+            id: 'devices',
+            label: 'Devices',
+            icon: (
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+            ),
+          },
+          {
+            id: 'settings',
+            label: 'Sync Settings',
+            icon: (
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            ),
+          },
+        ].map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as any)}
@@ -464,42 +543,66 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
           {/* Download Section */}
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Download for Your Platform
-              </h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Download for Your Platform</h2>
               {isLoadingRelease && (
                 <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full" />
               )}
             </div>
 
-            {/* Show Coming Soon message when repo is not configured */}
-            {!IS_REPO_CONFIGURED && (
+            {releaseError && (
               <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
                 <div className="flex items-start gap-3">
-                  <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg
+                    className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
                     <circle cx="12" cy="12" r="10" />
                     <line x1="12" y1="8" x2="12" y2="12" />
                     <line x1="12" y1="16" x2="12.01" y2="16" />
                   </svg>
                   <div>
-                    <h4 className="font-medium text-amber-800 dark:text-amber-300 mb-1">
-                      Desktop App Coming Soon
-                    </h4>
+                    <h4 className="font-medium text-amber-800 dark:text-amber-300 mb-1">Notice</h4>
+                    <p className="text-sm text-amber-700 dark:text-amber-400">{releaseError}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Show Coming Soon message when repo is not configured */}
+            {!IS_REPO_CONFIGURED && (
+              <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+                <div className="flex items-start gap-3">
+                  <svg
+                    className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  <div>
+                    <h4 className="font-medium text-amber-800 dark:text-amber-300 mb-1">Desktop App Coming Soon</h4>
                     <p className="text-sm text-amber-700 dark:text-amber-400">
-                      The desktop companion app is currently in development. Check back soon for download links, or sign up for notifications to be alerted when it's available.
+                      The desktop companion app is currently in development. Check back soon for download links.
                     </p>
                   </div>
                 </div>
               </div>
             )}
-            
+
             <div className="space-y-3">
               {/* Windows */}
               <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
                     <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/>
+                      <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801" />
                     </svg>
                   </div>
                   <div>
@@ -515,6 +618,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                         target="_blank"
                         rel="noopener noreferrer"
                         className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors inline-flex items-center gap-2"
+                        title={getAssetSize('windows', 'exe') ? `Size: ${getAssetSize('windows', 'exe')}` : undefined}
                       >
                         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -528,6 +632,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                         target="_blank"
                         rel="noopener noreferrer"
                         className="px-4 py-2 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-white text-sm font-medium rounded-lg transition-colors"
+                        title={getAssetSize('windows', 'portable') ? `Size: ${getAssetSize('windows', 'portable')}` : undefined}
                       >
                         Portable
                       </a>
@@ -545,7 +650,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-gray-100 dark:bg-gray-900/30 rounded-lg">
                     <svg className="w-6 h-6 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/>
+                      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
                     </svg>
                   </div>
                   <div>
@@ -559,6 +664,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                     target="_blank"
                     rel="noopener noreferrer"
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors inline-flex items-center gap-2"
+                    title={getAssetSize('mac', 'dmg') ? `Size: ${getAssetSize('mac', 'dmg')}` : undefined}
                   >
                     <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -579,7 +685,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg">
                     <svg className="w-6 h-6 text-orange-600 dark:text-orange-400" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 00-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.132 1.884 1.071.771-.06 1.592-.536 2.257-1.306.631-.765 1.683-1.084 2.378-1.503.348-.199.629-.469.649-.853.023-.4-.2-.811-.714-1.376v-.097l-.003-.003c-.17-.2-.25-.535-.338-.926-.085-.401-.182-.786-.492-1.046h-.003c-.059-.054-.123-.067-.188-.135a.357.357 0 00-.19-.064c.431-1.278.264-2.55-.173-3.694-.533-1.41-1.465-2.638-2.175-3.483-.796-1.005-1.576-1.957-1.56-3.368.026-2.152.236-6.133-3.544-6.139z"/>
+                      <path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 00-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.132 1.884 1.071.771-.06 1.592-.536 2.257-1.306.631-.765 1.683-1.084 2.378-1.503.348-.199.629-.469.649-.853.023-.4-.2-.811-.714-1.376v-.097l-.003-.003c-.17-.2-.25-.535-.338-.926-.085-.401-.182-.786-.492-1.046h-.003c-.059-.054-.123-.067-.188-.135a.357.357 0 00-.19-.064c.431-1.278.264-2.55-.173-3.694-.533-1.41-1.465-2.638-2.175-3.483-.796-1.005-1.576-1.957-1.56-3.368.026-2.152.236-6.133-3.544-6.139z" />
                     </svg>
                   </div>
                   <div>
@@ -595,6 +701,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                         target="_blank"
                         rel="noopener noreferrer"
                         className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors inline-flex items-center gap-2"
+                        title={getAssetSize('linux', 'appimage') ? `Size: ${getAssetSize('linux', 'appimage')}` : undefined}
                       >
                         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -608,6 +715,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                         target="_blank"
                         rel="noopener noreferrer"
                         className="px-4 py-2 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-white text-sm font-medium rounded-lg transition-colors"
+                        title={getAssetSize('linux', 'deb') ? `Size: ${getAssetSize('linux', 'deb')}` : undefined}
                       >
                         .deb
                       </a>
@@ -626,7 +734,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   Version {version} • Released {releaseDate}
                 </p>
-                <a 
+                <a
                   href={latestRelease.html_url}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -642,7 +750,6 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
               </div>
             )}
 
-            {/* All Releases Link - only show if repo is configured */}
             {IS_REPO_CONFIGURED && (
               <a
                 href={RELEASES_URL}
@@ -651,28 +758,25 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                 className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-xl transition-colors"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                  <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
                 </svg>
                 View All Releases on GitHub
               </a>
             )}
           </div>
 
-
           {/* Features */}
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Desktop App Features
-            </h2>
-            
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Desktop App Features</h2>
+
             <div className="space-y-4">
               {[
-                { title: 'System-Wide Tracking', desc: 'Track time across ALL applications - browsers, IDEs, design tools, and more' },
+                { title: 'System-Wide Tracking', desc: 'Track time across ALL applications, browsers, IDEs, design tools, and more' },
                 { title: 'Native OS Integration', desc: 'Uses native APIs for accurate window detection and idle monitoring' },
                 { title: 'Automatic Idle Detection', desc: 'Detects screen lock, sleep, and user inactivity automatically' },
                 { title: 'System Tray', desc: 'Runs quietly in the background with quick access from system tray' },
                 { title: 'Auto-Updates', desc: 'Automatically checks for updates and installs them seamlessly' },
-                { title: 'Code Signed', desc: 'Signed and notarized for Windows and macOS for your security' }
+                { title: 'Code Signed', desc: 'Signed and notarized for Windows and macOS for your security' },
               ].map((feature, idx) => (
                 <div key={idx} className="flex items-start gap-3">
                   <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
@@ -697,9 +801,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                 </svg>
                 <div>
                   <h4 className="font-medium text-blue-800 dark:text-blue-300">Verified & Secure</h4>
-                  <p className="text-sm text-blue-600 dark:text-blue-400">
-                    All releases are code-signed and verified
-                  </p>
+                  <p className="text-sm text-blue-600 dark:text-blue-400">All releases are code-signed and verified</p>
                 </div>
               </div>
             </div>
@@ -711,10 +813,8 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Connection Setup */}
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Connect Desktop App
-            </h2>
-            
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Connect Desktop App</h2>
+
             <div className="space-y-6">
               {/* Step 1 */}
               <div className="flex gap-4">
@@ -723,15 +823,11 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                 </div>
                 <div className="flex-1">
                   <h3 className="font-medium text-gray-900 dark:text-white mb-2">Generate Sync Token</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                    Create a secure token to authenticate the desktop app
-                  </p>
-                  
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">Create a secure token to authenticate the desktop app</p>
+
                   {!user && (
                     <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg mb-3">
-                      <p className="text-sm text-amber-700 dark:text-amber-400">
-                        Please sign in to generate a sync token
-                      </p>
+                      <p className="text-sm text-amber-700 dark:text-amber-400">Please sign in to generate a sync token</p>
                     </div>
                   )}
 
@@ -740,7 +836,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                       <p className="text-sm text-red-700 dark:text-red-400">{tokenError}</p>
                     </div>
                   )}
-                  
+
                   {syncToken ? (
                     <div className="space-y-2">
                       <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg font-mono text-sm text-gray-600 dark:text-gray-300 break-all">
@@ -796,19 +892,16 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                 <div className="flex-1">
                   <h3 className="font-medium text-gray-900 dark:text-white mb-2">Copy Sync URL</h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                    The desktop app needs this URL to sync data to the cloud
+                    The desktop app needs this URL to connect to Supabase
                   </p>
                   <div className="flex items-center gap-2">
                     <div className="flex-1 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg font-mono text-xs text-gray-600 dark:text-gray-300 break-all">
                       {supabaseUrl}
                     </div>
                     <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(supabaseUrl);
-                        setCopiedUrl(true);
-                        setTimeout(() => setCopiedUrl(false), 2000);
-                      }}
+                      onClick={copySupabaseUrl}
                       className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex-shrink-0"
+                      title="Copy Supabase URL"
                     >
                       {copiedUrl ? (
                         <svg className="w-5 h-5 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -828,12 +921,10 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                       <line x1="12" y1="8" x2="12" y2="12" />
                       <line x1="12" y1="16" x2="12.01" y2="16" />
                     </svg>
-                    This is the server URL, not the web app URL
+                    This is the Supabase project URL (server URL), not your web app URL
                   </p>
                 </div>
               </div>
-
-
 
               {/* Step 3 */}
               <div className="flex gap-4">
@@ -850,7 +941,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                       <svg className="w-4 h-4 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
-                      The Sync URL in the URL field
+                      The Supabase URL in the URL field
                     </li>
                     <li className="flex items-center gap-2">
                       <svg className="w-4 h-4 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -867,10 +958,8 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
           {/* Instructions */}
           <div className="space-y-6">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                How Sync Works
-              </h2>
-              
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">How Sync Works</h2>
+
               <div className="space-y-4">
                 <div className="flex items-start gap-3">
                   <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
@@ -937,18 +1026,21 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
 
             <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4">
               <div className="flex items-start gap-3">
-                <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <circle cx="12" cy="12" r="10" />
                   <line x1="12" y1="8" x2="12" y2="12" />
                   <line x1="12" y1="16" x2="12.01" y2="16" />
                 </svg>
                 <div>
-                  <h4 className="font-medium text-amber-800 dark:text-amber-300 mb-1">
-                    Keep Your Token Secure
-                  </h4>
+                  <h4 className="font-medium text-amber-800 dark:text-amber-300 mb-1">Keep Your Token Secure</h4>
                   <p className="text-sm text-amber-700 dark:text-amber-400">
-                    Your sync token is like a password. Don't share it with others. 
-                    If you think it's been compromised, regenerate it immediately.
+                    Your sync token is like a password. Don&apos;t share it. If you think it&apos;s been compromised, regenerate it immediately.
                   </p>
                 </div>
               </div>
@@ -959,10 +1051,11 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
 
       {activeTab === 'devices' && (
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-            Connected Devices
-          </h2>
-          
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Connected Devices</h2>
+            {isLoadingDevices && <div className="animate-spin w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full" />}
+          </div>
+
           {connectedDevices.length === 0 ? (
             <div className="text-center py-12">
               <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -972,17 +1065,13 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                   <line x1="12" y1="17" x2="12" y2="21" />
                 </svg>
               </div>
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                No Devices Connected
-              </h3>
-              <p className="text-gray-500 dark:text-gray-400 mb-4">
-                Download the desktop app and connect it to start syncing activities
-              </p>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No Devices Connected</h3>
+              <p className="text-gray-500 dark:text-gray-400 mb-4">Generate a token and connect the desktop app to start syncing</p>
               <button
-                onClick={() => setActiveTab('download')}
+                onClick={() => setActiveTab('connect')}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
               >
-                Download Desktop App
+                Connect Desktop App
               </button>
             </div>
           ) : (
@@ -998,17 +1087,22 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                       </svg>
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900 dark:text-white">{device.device_name}</p>
+                      <p className="font-medium text-gray-900 dark:text-white">{device.device_name || 'Desktop App'}</p>
                       <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Last sync: {device.last_used_at ? new Date(device.last_used_at).toLocaleString() : 'Never'}
+                        Last sync: {formatDateTime(device.last_used_at)}
+                        {device.expires_at ? (
+                          <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">
+                            • Expires: {formatDate(device.expires_at)}
+                          </span>
+                        ) : null}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="px-2 py-1 bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 text-xs font-medium rounded-full capitalize">
-                      {device.platform === 'win32' ? 'Windows' : device.platform === 'darwin' ? 'macOS' : 'Linux'}
+                      {platformLabel(device.platform)}
                     </span>
-                    <button 
+                    <button
                       onClick={() => revokeDevice(device.id)}
                       className="p-2 text-gray-400 hover:text-red-500 transition-colors"
                       title="Revoke device access"
@@ -1030,11 +1124,9 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Sync Settings */}
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Auto-Sync Configuration
-            </h2>
-            
-            {!user && (
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Auto-Sync Configuration</h2>
+
+            {!effectiveUserId && (
               <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl mb-6">
                 <div className="flex items-start gap-3">
                   <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1043,9 +1135,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                     <line x1="12" y1="16" x2="12.01" y2="16" />
                   </svg>
                   <div>
-                    <h4 className="font-medium text-amber-800 dark:text-amber-300 mb-1">
-                      Sign In Required
-                    </h4>
+                    <h4 className="font-medium text-amber-800 dark:text-amber-300 mb-1">Sign In Required</h4>
                     <p className="text-sm text-amber-700 dark:text-amber-400">
                       Please sign in to configure sync settings. Your preferences will be saved to your account.
                     </p>
@@ -1053,27 +1143,23 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                 </div>
               </div>
             )}
-            
+
             <div className="space-y-6">
               {/* Sync Interval */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Sync Interval
-                </label>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                  How often should the desktop app automatically sync activities?
-                </p>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Sync Interval</label>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">How often should the desktop app automatically sync activities?</p>
                 <div className="grid grid-cols-3 gap-3">
                   {[5, 15, 30].map((interval) => (
                     <button
                       key={interval}
-                      onClick={() => setSyncSettings(prev => ({ ...prev, syncInterval: interval as 5 | 15 | 30 }))}
-                      disabled={!user}
+                      onClick={() => setSyncSettings((prev) => ({ ...prev, syncInterval: interval as 5 | 15 | 30 }))}
+                      disabled={!effectiveUserId}
                       className={`p-3 rounded-xl border-2 transition-all ${
                         syncSettings.syncInterval === interval
                           ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
                           : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 text-gray-700 dark:text-gray-300'
-                      } ${!user ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      } ${!effectiveUserId ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       <div className="text-lg font-semibold">{interval}</div>
                       <div className="text-xs text-gray-500 dark:text-gray-400">minutes</div>
@@ -1084,96 +1170,58 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
 
               {/* Toggle Options */}
               <div className="space-y-4">
-                {/* Auto Sync Enabled */}
-                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
-                  <div>
-                    <h3 className="font-medium text-gray-900 dark:text-white">Enable Auto-Sync</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Automatically sync activities at the configured interval
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setSyncSettings(prev => ({ ...prev, autoSyncEnabled: !prev.autoSyncEnabled }))}
-                    disabled={!user}
-                    className={`relative w-12 h-6 rounded-full transition-colors ${
-                      syncSettings.autoSyncEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
-                    } ${!user ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                      syncSettings.autoSyncEnabled ? 'translate-x-7' : 'translate-x-1'
-                    }`} />
-                  </button>
-                </div>
-
-                {/* Sync on Close */}
-                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
-                  <div>
-                    <h3 className="font-medium text-gray-900 dark:text-white">Sync on App Close</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Sync all pending activities when closing the desktop app
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setSyncSettings(prev => ({ ...prev, syncOnClose: !prev.syncOnClose }))}
-                    disabled={!user}
-                    className={`relative w-12 h-6 rounded-full transition-colors ${
-                      syncSettings.syncOnClose ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
-                    } ${!user ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                      syncSettings.syncOnClose ? 'translate-x-7' : 'translate-x-1'
-                    }`} />
-                  </button>
-                </div>
-
-                {/* Sync on Idle */}
-                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
-                  <div>
-                    <h3 className="font-medium text-gray-900 dark:text-white">Sync When Idle</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Trigger sync when idle is detected (screen lock, inactivity)
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setSyncSettings(prev => ({ ...prev, syncOnIdle: !prev.syncOnIdle }))}
-                    disabled={!user}
-                    className={`relative w-12 h-6 rounded-full transition-colors ${
-                      syncSettings.syncOnIdle ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
-                    } ${!user ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                      syncSettings.syncOnIdle ? 'translate-x-7' : 'translate-x-1'
-                    }`} />
-                  </button>
-                </div>
-
-                {/* Sync on Startup */}
-                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
-                  <div>
-                    <h3 className="font-medium text-gray-900 dark:text-white">Sync on Startup</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Sync pending activities when the desktop app starts
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setSyncSettings(prev => ({ ...prev, syncOnStartup: !prev.syncOnStartup }))}
-                    disabled={!user}
-                    className={`relative w-12 h-6 rounded-full transition-colors ${
-                      syncSettings.syncOnStartup ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
-                    } ${!user ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                      syncSettings.syncOnStartup ? 'translate-x-7' : 'translate-x-1'
-                    }`} />
-                  </button>
-                </div>
+                {[
+                  {
+                    title: 'Enable Auto-Sync',
+                    desc: 'Automatically sync activities at the configured interval',
+                    key: 'autoSyncEnabled' as const,
+                  },
+                  {
+                    title: 'Sync on App Close',
+                    desc: 'Sync all pending activities when closing the desktop app',
+                    key: 'syncOnClose' as const,
+                  },
+                  {
+                    title: 'Sync When Idle',
+                    desc: 'Trigger sync when idle is detected (screen lock, inactivity)',
+                    key: 'syncOnIdle' as const,
+                  },
+                  {
+                    title: 'Sync on Startup',
+                    desc: 'Sync pending activities when the desktop app starts',
+                    key: 'syncOnStartup' as const,
+                  },
+                ].map((opt) => {
+                  const isOn = syncSettings[opt.key];
+                  return (
+                    <div key={opt.key} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
+                      <div>
+                        <h3 className="font-medium text-gray-900 dark:text-white">{opt.title}</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">{opt.desc}</p>
+                      </div>
+                      <button
+                        onClick={() => setSyncSettings((prev) => ({ ...prev, [opt.key]: !prev[opt.key] }))}
+                        disabled={!effectiveUserId}
+                        className={`relative w-12 h-6 rounded-full transition-colors ${
+                          isOn ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                        } ${!effectiveUserId ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        <div
+                          className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
+                            isOn ? 'translate-x-7' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Save Button */}
               <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
                 <button
                   onClick={saveSyncSettings}
-                  disabled={!user || isSavingSettings}
+                  disabled={!effectiveUserId || isSavingSettings}
                   className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {isSavingSettings ? (
@@ -1199,10 +1247,8 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
           {/* Info Panel */}
           <div className="space-y-6">
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 p-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                How Auto-Sync Works
-              </h2>
-              
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">How Auto-Sync Works</h2>
+
               <div className="space-y-4">
                 <div className="flex items-start gap-3">
                   <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
@@ -1213,9 +1259,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                   </div>
                   <div>
                     <h3 className="font-medium text-gray-900 dark:text-white">Interval Sync</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Activities are batched and synced at your chosen interval (5, 15, or 30 minutes)
-                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Activities are batched and synced at your chosen interval (5, 15, or 30 minutes)</p>
                   </div>
                 </div>
 
@@ -1228,9 +1272,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                   </div>
                   <div>
                     <h3 className="font-medium text-gray-900 dark:text-white">Idle Detection</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      When you step away, activities are synced before the idle period begins
-                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">When you step away, activities are synced before the idle period begins</p>
                   </div>
                 </div>
 
@@ -1243,9 +1285,7 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                   </div>
                   <div>
                     <h3 className="font-medium text-gray-900 dark:text-white">Reliable Delivery</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Failed syncs are automatically retried to ensure no data is lost
-                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Failed syncs are automatically retried to ensure no data is lost</p>
                   </div>
                 </div>
               </div>
@@ -1259,12 +1299,9 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
                   <path d="M12 8h.01" />
                 </svg>
                 <div>
-                  <h4 className="font-medium text-blue-800 dark:text-blue-300 mb-1">
-                    Settings Sync
-                  </h4>
+                  <h4 className="font-medium text-blue-800 dark:text-blue-300 mb-1">Settings Sync</h4>
                   <p className="text-sm text-blue-700 dark:text-blue-400">
-                    These settings are saved to your account and will be applied to all connected desktop apps. 
-                    Changes take effect immediately on the desktop app.
+                    These settings are saved to your account and will be applied to all connected desktop apps.
                   </p>
                 </div>
               </div>
