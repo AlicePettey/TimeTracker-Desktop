@@ -1306,6 +1306,5 @@ const DesktopCompanion: React.FC<DesktopCompanionProps> = ({ onImportActivities,
       )}
     </div>
   );
-};
 
 export default DesktopCompanion;
