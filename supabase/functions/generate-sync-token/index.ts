@@ -35,20 +35,12 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
   try {
-    // Support multiple env var names (because your project has both URL + SUPABASE_URL, etc.)
-    const supabaseUrl =
-      Deno.env.get("SUPABASE_URL") ??
-      Deno.env.get("URL") ??
-      Deno.env.get("SUPABASE_FUNCTIONS_URL");
-
-    const serviceKey =
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ??
-      Deno.env.get("SERVICE_ROLE_KEY");
-
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const ttlHoursRaw = Deno.env.get("SYNC_TOKEN_TTL_HOURS") ?? "72";
 
-    if (!supabaseUrl) return json(500, { error: "Missing SUPABASE_URL (or URL)" });
-    if (!serviceKey) return json(500, { error: "Missing SUPABASE_SERVICE_ROLE_KEY (or SERVICE_ROLE_KEY)" });
+    if (!supabaseUrl) return json(500, { error: "Missing SUPABASE_URL" });
+    if (!serviceKey) return json(500, { error: "Missing SUPABASE_SERVICE_ROLE_KEY" });
 
     const ttlHours = Number(ttlHoursRaw);
     if (!Number.isFinite(ttlHours) || ttlHours <= 0) {
@@ -56,68 +48,50 @@ Deno.serve(async (req) => {
     }
 
     const authHeader = req.headers.get("authorization") ?? "";
-    const hasBearer = authHeader.toLowerCase().startsWith("bearer ");
-    if (!hasBearer) {
-      // This is the most important “is the header arriving?” check
-      return json(401, {
-        error: "Missing bearer token",
-        debug: {
-          receivedAuthorizationHeader: authHeader ? "present-but-not-bearer" : "missing",
-        },
-      });
-    }
+    const jwt = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!jwt) return json(401, { error: "Missing bearer token" });
 
-    // Create admin client for DB insert.
+    // Admin client (service role) – validate user via JWT
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    // Validate the user's JWT by asking Supabase Auth (using the JWT as the Authorization header)
-    const jwt = authHeader.slice(7); // remove "Bearer "
     const { data: userResp, error: userErr } = await admin.auth.getUser(jwt);
-
     if (userErr || !userResp?.user) {
-      return json(401, {
-        error: "Invalid session token",
-        debug: {
-          message: userErr?.message ?? null,
-        },
-      });
+      return json(401, { error: "Invalid session token", detail: userErr?.message ?? null });
     }
 
     const userId = userResp.user.id;
 
     const body = await req.json().catch(() => ({}));
-    const deviceId = typeof body?.deviceId === "string" ? body.deviceId : null;
-    const deviceName = typeof body?.deviceName === "string" ? body.deviceName : "Desktop App";
-    const platform = typeof body?.platform === "string" ? body.platform : "unknown";
+    const deviceId =
+      typeof body?.deviceId === "string" && body.deviceId.trim() ? body.deviceId.trim() : null;
+    const deviceName =
+      typeof body?.deviceName === "string" && body.deviceName.trim()
+        ? body.deviceName.trim()
+        : "Desktop App";
+    const platform =
+      typeof body?.platform === "string" && body.platform.trim() ? body.platform.trim() : "unknown";
 
     const token = randomToken(32);
     const tokenHash = await sha256(token);
     const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000).toISOString();
 
-    const insertPayload: Record<string, unknown> = {
+    const { error: insertErr } = await admin.from("sync_tokens").insert({
       user_id: userId,
       token_hash: tokenHash,
       expires_at: expiresAt,
-    };
+      device_id: deviceId,
+      device_name: deviceName,
+      platform,
+      last_used_at: new Date().toISOString(),
+      is_revoked: false,
+    });
 
-    // Only include these if your table has the columns (safe to try; if it errors, you'll see message)
-    if (deviceId) insertPayload.device_id = deviceId;
-    insertPayload.device_name = deviceName;
-    insertPayload.platform = platform;
-
-    const { error: insertErr } = await admin.from("sync_tokens").insert(insertPayload);
-
-    if (insertErr) {
-      return json(500, {
-        error: "Insert failed",
-        debug: { message: insertErr.message },
-      });
-    }
+    if (insertErr) return json(500, { error: insertErr.message });
 
     return json(200, { success: true, token, expires_at: expiresAt });
   } catch (e) {
-    return json(500, { error: "Unhandled error", debug: { message: String(e) } });
+    return json(500, { error: String(e) });
   }
 });
