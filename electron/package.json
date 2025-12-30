@@ -1,6 +1,6 @@
 {
   "name": "timetracker-desktop",
-  "version": "1.8.11",
+  "version": "1.8.12",
   "description": "TimeTracker Desktop Companion - System-wide activity tracking",
   "main": "main.js",
   "author": {

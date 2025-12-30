@@ -52,8 +52,9 @@ const store = new Store({
     activities: [],
     settings: {
       idleThreshold: 300,
-      minActivityDuration: 10,
+      minActivityDuration: 120,
       syncEnabled: true,
+      switchDebounceSeconds: 7,
 
       // IMPORTANT: Set these in the Desktop UI settings
       syncUrl: '',          // https://xxxxx.supabase.co
@@ -365,11 +366,16 @@ async function initializeTracker() {
   const ActivityTracker = await loadTracker();
   if (!ActivityTracker) return;
 
-  const settings = store.get('settings');
+  const settings = store.get('settings') || {};
 
   tracker = new ActivityTracker({
-    idleThreshold: settings.idleThreshold,
-    minActivityDuration: settings.minActivityDuration,
+    idleThreshold: settings.idleThreshold ?? 300,
+    minActivityDuration: settings.minActivityDuration ?? 60,
+    getSystemIdleSeconds: () => powerMonitor.getSystemIdleTime(),
+    switchDebounceSeconds: settings.switchDebounceSeconds ?? 7,
+    excludeApps: settings.excludeApps ?? [],
+    excludeTitles: settings.excludeTitles ?? [],
+
     onActivity: (activity) => {
       const activities = store.get('activities') || [];
       activities.push(activity);
@@ -378,22 +384,32 @@ async function initializeTracker() {
       const filtered = activities.filter(a => new Date(a.startTime).getTime() > thirtyDaysAgo);
       store.set('activities', filtered);
 
-      if (settings.syncEnabled) {
+      // ✅ Always read latest settings here
+      const latestSettings = store.get('settings') || {};
+      const syncEnabled =
+        latestSettings.syncEnabled ?? latestSettings.autoSyncEnabled ?? false;
+
+      if (syncEnabled) {
         const syncQueue = store.get('syncQueue') || [];
         syncQueue.push(activity);
         store.set('syncQueue', syncQueue);
       }
 
-      if (mainWindow?.webContents) mainWindow.webContents.send('activity-logged', activity);
+      if (mainWindow?.webContents) {
+        mainWindow.webContents.send('activity-logged', activity);
+      }
     },
+
     onIdleStart: () => {
       if (mainWindow?.webContents) mainWindow.webContents.send('idle-started');
       handleIdleSync();
     },
+
     onIdleEnd: (idleDuration) => {
       if (mainWindow?.webContents) mainWindow.webContents.send('idle-ended', idleDuration);
       handleIdleEnd();
     },
+
     onStatusChange: (status) => {
       if (mainWindow?.webContents) mainWindow.webContents.send('tracking-status-changed', status);
       updateTrayMenu();
@@ -506,14 +522,27 @@ function setupIpcHandlers() {
 
   ipcMain.handle('update-settings', (event, newSettings) => {
     const current = store.get('settings');
-    const updated = { ...current, ...newSettings };
+    const updated = {
+      ...current,
+      ...newSettings,
+      idleThreshold: Number(newSettings.idleThreshold ?? current.idleThreshold ?? 300),
+      minActivityDuration: Number(newSettings.minActivityDuration ?? current.minActivityDuration ?? 60),
+      switchDebounceSeconds: Number(newSettings.switchDebounceSeconds ?? current.switchDebounceSeconds ?? 7),
+      excludeApps: Array.isArray(newSettings.excludeApps) ? newSettings.excludeApps : (current.excludeApps ?? []),
+      excludeTitles: Array.isArray(newSettings.excludeTitles) ? newSettings.excludeTitles : (current.excludeTitles ?? [])
+    };
     store.set('settings', updated);
 
     if (tracker?.updateSettings) {
-      tracker.updateSettings({
-        idleThreshold: updated.idleThreshold,
-        minActivityDuration: updated.minActivityDuration
-      });
+    tracker.updateSettings({
+      idleThreshold: updated.idleThreshold,
+      minActivityDuration: updated.minActivityDuration,
+      switchDebounceSeconds: updated.switchDebounceSeconds,
+      excludeApps: updated.excludeApps,
+      excludeTitles: updated.excludeTitles,
+      pollInterval: updated.pollInterval,
+      autoCategorize: updated.autoCategorize
+    });
     }
 
     // restart timer if sync settings changed
