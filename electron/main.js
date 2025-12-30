@@ -332,11 +332,6 @@ ipcMain.handle('get-release-url', async () => {
   return null;
 });
 
-ipcMain.handle('get-update-status', async () => {
-  if (updater && updater.getStatus) return updater.getStatus();
-  return { status: 'unknown' };
-});
-
 ipcMain.handle('get-app-version', async () => {
   return { version: app.getVersion() };
 });
