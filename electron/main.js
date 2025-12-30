@@ -1,6 +1,6 @@
 // electron/main.js
 
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell } = require('electron');
 const path = require('path');
 const os = require('os');
 const Store = require('electron-store');
@@ -22,14 +22,13 @@ const store = new Store({
       syncOnClose: true,
       syncOnIdle: true,
 
-      // Your Supabase project URL (e.g. https://xxxxx.supabase.co)
+      // Supabase project URL (e.g. https://xxxxx.supabase.co)
       syncUrl: '',
 
-      // Your generated desktop sync token (issued by your generate-sync-token function)
+      // Desktop sync token issued by your generate-sync-token (web app)
       syncToken: '',
 
-      // Supabase anon/public key (required for Edge Functions routing/auth)
-      // Recommended: set SUPABASE_ANON_KEY in env instead of storing it, but both work.
+      // Supabase anon key (prefer env var, fallback to stored)
       syncAnonKey: '',
 
       lastSyncTime: null
@@ -39,6 +38,13 @@ const store = new Store({
 
 let mainWindow = null;
 let tray = null;
+
+// -----------------------------
+// Window / Security helpers
+// -----------------------------
+function isHttpUrl(url) {
+  return typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'));
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -52,23 +58,41 @@ function createWindow() {
     }
   });
 
-  // In dev you probably load Vite; in prod load the built index.html
+  // Prevent Electron from opening new windows inside the app.
+  // Instead, open external links in the user's default browser.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isHttpUrl(url)) {
+      shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    return { action: 'deny' };
+  });
+
+  // Prevent top-level navigation away from your app (common cause of "it opened a web page")
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    // allow local dev URL / file loads, block external http(s)
+    if (isHttpUrl(url)) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
   const isDev = !app.isPackaged;
   if (isDev) {
     const devUrl = process.env.ELECTRON_RENDERER_URL || 'http://localhost:5173';
     mainWindow.loadURL(devUrl);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
+    // adjust if your production path differs
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 
-  mainWindow.on('close', async (e) => {
+  mainWindow.on('close', async () => {
     const settings = store.get('settings');
     if (settings?.syncOnClose) {
       try {
         await syncActivities();
       } catch (err) {
-        // Don’t block close for sync failure.
         console.error('Sync on close failed:', err);
       }
     }
@@ -89,10 +113,7 @@ function createTray() {
       }
     },
     { type: 'separator' },
-    {
-      label: 'Quit',
-      click: () => app.quit()
-    }
+    { label: 'Quit', click: () => app.quit() }
   ]);
 
   tray.setToolTip('TimeTracker');
@@ -117,23 +138,20 @@ function getOrCreateDeviceId() {
 // Sync Logic
 // -----------------------------
 async function syncActivities() {
-  const settings = store.get('settings');
+  const settings = store.get('settings') || {};
   const anonKey = process.env.SUPABASE_ANON_KEY || settings.syncAnonKey;
 
   if (!anonKey) {
     throw new Error('Supabase anon key missing. Set SUPABASE_ANON_KEY or settings.syncAnonKey.');
   }
 
-  if (!settings?.syncUrl || !settings?.syncToken) {
-    console.log('Sync not configured (missing syncUrl or syncToken).');
-    return { ok: false, error: 'Sync not configured' };
+  if (!settings.syncUrl || !settings.syncToken) {
+    return { ok: false, error: 'Sync not configured (missing syncUrl or syncToken).' };
   }
 
   const deviceId = getOrCreateDeviceId();
-  const syncUrl = settings.syncUrl.replace(/\/$/, '');
+  const syncUrl = String(settings.syncUrl).replace(/\/$/, '');
 
-  // Pull from your local queue (based on how your tracker module stores it)
-  // If your tracker uses a different API, adjust these calls.
   const syncQueue = tracker.getSyncQueue ? tracker.getSyncQueue() : [];
   if (!syncQueue || syncQueue.length === 0) {
     return { ok: true, inserted: 0, updated: 0, message: 'Nothing to sync' };
@@ -160,9 +178,9 @@ async function syncActivities() {
       'x-sync-token': settings.syncToken,
       'x-device-id': deviceId,
 
-      // REQUIRED for Supabase Edge Functions endpoint
-      'Authorization': `Bearer ${anonKey}`,
-      'apikey': anonKey
+      // REQUIRED for Supabase Edge Functions endpoint routing/auth
+      Authorization: `Bearer ${anonKey}`,
+      apikey: anonKey
     },
     body: JSON.stringify({
       activities,
@@ -175,7 +193,7 @@ async function syncActivities() {
   });
 
   const payloadText = await res.text();
-  let payload;
+  let payload = {};
   try {
     payload = payloadText ? JSON.parse(payloadText) : {};
   } catch {
@@ -187,60 +205,159 @@ async function syncActivities() {
     throw new Error(`desktop-sync failed: ${msg}`);
   }
 
-  // If function returns counts, keep them.
-  // Otherwise still treat as success.
   const inserted = payload?.inserted ?? payload?.counts?.inserted ?? 0;
   const updated = payload?.updated ?? payload?.counts?.updated ?? 0;
 
-  // Clear queue on success
   if (tracker.clearSyncQueue) tracker.clearSyncQueue();
 
-  store.set('settings.lastSyncTime', new Date().toISOString());
+  const nowIso = new Date().toISOString();
+  store.set('settings.lastSyncTime', nowIso);
+
+  // Notify renderer listeners
+  if (mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send('sync-completed', { ok: true, inserted, updated, at: nowIso });
+  }
 
   return { ok: true, inserted, updated, payload };
 }
 
 // -----------------------------
-// IPC handlers (renderer ↔ main)
+// IPC handlers (must match preload.js)
 // -----------------------------
-ipcMain.handle('get-settings', async () => {
-  return store.get('settings');
-});
 
+// Settings
+ipcMain.handle('get-settings', async () => store.get('settings'));
 ipcMain.handle('update-settings', async (event, partial) => {
   const current = store.get('settings') || {};
-  const next = { ...current, ...partial };
+  const next = { ...current, ...(partial || {}) };
   store.set('settings', next);
   return next;
 });
 
-ipcMain.handle('get-device-id', async () => {
-  return getOrCreateDeviceId();
+// Device Info
+ipcMain.handle('get-device-info', async () => {
+  return {
+    deviceId: getOrCreateDeviceId(),
+    deviceName: os.hostname(),
+    platform: process.platform,
+    arch: process.arch
+  };
 });
 
-ipcMain.handle('sync-now', async () => {
-  return await syncActivities();
+// Window controls
+ipcMain.handle('window-minimize', async () => {
+  if (mainWindow) mainWindow.minimize();
+  return { ok: true };
 });
 
+ipcMain.handle('window-close', async () => {
+  if (mainWindow) mainWindow.close();
+  return { ok: true };
+});
+
+// External links
+ipcMain.handle('open-external', async (event, url) => {
+  if (!url || !isHttpUrl(url)) return { ok: false, error: 'Invalid URL' };
+  await shell.openExternal(url);
+  return { ok: true };
+});
+
+// Tracking Control (align with preload names)
 ipcMain.handle('start-tracking', async () => {
   if (tracker.start) tracker.start();
   return { ok: true };
 });
 
-ipcMain.handle('stop-tracking', async () => {
-  if (tracker.stop) tracker.stop();
+ipcMain.handle('pause-tracking', async () => {
+  if (tracker.pause) tracker.pause();
+  else if (tracker.stop) tracker.stop();
   return { ok: true };
 });
 
+ipcMain.handle('get-tracking-status', async () => {
+  if (tracker.getStatus) return tracker.getStatus();
+  return { trackingEnabled: store.get('settings')?.trackingEnabled ?? true };
+});
+
+// Activities
 ipcMain.handle('get-activities', async () => {
   if (tracker.getActivities) return tracker.getActivities();
   return [];
 });
 
-ipcMain.handle('get-sync-queue', async () => {
-  if (tracker.getSyncQueue) return tracker.getSyncQueue();
+// If your preload calls these, keep them so the renderer doesn’t crash.
+// Implement properly if/when you wire them.
+ipcMain.handle('get-today-activities', async () => {
+  if (tracker.getTodayActivities) return tracker.getTodayActivities();
   return [];
 });
+
+ipcMain.handle('code-activity', async (event, data) => {
+  if (tracker.codeActivity) return tracker.codeActivity(data);
+  return { ok: false, error: 'codeActivity not implemented in tracker' };
+});
+
+ipcMain.handle('delete-activity', async (event, activityId) => {
+  if (tracker.deleteActivity) return tracker.deleteActivity(activityId);
+  return { ok: false, error: 'deleteActivity not implemented in tracker' };
+});
+
+// Sync (align with preload names)
+ipcMain.handle('sync-activities', async () => {
+  return await syncActivities();
+});
+
+ipcMain.handle('get-sync-status', async () => {
+  const settings = store.get('settings') || {};
+  return {
+    configured: Boolean(settings.syncUrl && settings.syncToken),
+    lastSyncTime: settings.lastSyncTime || null
+  };
+});
+
+// Token generation
+// NOTE: This should generally happen in the *web app* (user logged in).
+// Keep this handler so UI calls don’t crash, but return a friendly message.
+ipcMain.handle('generate-sync-token', async () => {
+  return {
+    ok: false,
+    error:
+      'Token generation is handled in the web app (authenticated). Copy the token into Desktop settings.'
+  };
+});
+
+// Releases / Updates (safe stubs + optional hookup)
+ipcMain.handle('get-release-url', async () => {
+  if (updater && updater.getReleaseUrl) return updater.getReleaseUrl();
+  return null;
+});
+
+ipcMain.handle('check-for-updates', async () => {
+  if (updater && updater.checkForUpdates) return updater.checkForUpdates();
+  return { ok: false, error: 'Updater not configured' };
+});
+
+ipcMain.handle('download-update', async () => {
+  if (updater && updater.downloadUpdate) return updater.downloadUpdate();
+  return { ok: false, error: 'Updater not configured' };
+});
+
+ipcMain.handle('install-update', async () => {
+  if (updater && updater.installUpdate) return updater.installUpdate();
+  return { ok: false, error: 'Updater not configured' };
+});
+
+ipcMain.handle('get-update-status', async () => {
+  if (updater && updater.getStatus) return updater.getStatus();
+  return { status: 'unknown' };
+});
+
+ipcMain.handle('get-app-version', async () => {
+  return { version: app.getVersion() };
+});
+
+ipcMain.handle('set-auto-download', async () => ({ ok: true }));
+ipcMain.handle('set-allow-prerelease', async () => ({ ok: true }));
 
 // -----------------------------
 // App lifecycle
@@ -249,16 +366,14 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
 
-  // Start auto-updater if your project uses it
   try {
     if (updater && updater.init) updater.init(mainWindow);
   } catch (e) {
     console.warn('Updater init skipped/failed:', e);
   }
 
-  // Optionally sync on startup
-  const settings = store.get('settings');
-  if (settings?.syncOnStartup) {
+  const settings = store.get('settings') || {};
+  if (settings.syncOnStartup) {
     try {
       await syncActivities();
     } catch (err) {
@@ -266,11 +381,10 @@ app.whenReady().then(async () => {
     }
   }
 
-  // Auto-sync timer
   setInterval(async () => {
     try {
-      const s = store.get('settings');
-      if (!s?.autoSyncEnabled) return;
+      const s = store.get('settings') || {};
+      if (!s.autoSyncEnabled) return;
       await syncActivities();
     } catch (err) {
       console.error('Auto-sync failed:', err);
@@ -283,6 +397,5 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  // On macOS, typical behavior is to keep app running.
   if (process.platform !== 'darwin') app.quit();
 });
