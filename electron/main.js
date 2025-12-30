@@ -332,10 +332,6 @@ ipcMain.handle('get-release-url', async () => {
   return null;
 });
 
-ipcMain.handle('get-app-version', async () => {
-  return { version: app.getVersion() };
-});
-
 ipcMain.handle('set-auto-download', async () => ({ ok: true }));
 ipcMain.handle('set-allow-prerelease', async () => ({ ok: true }));
 
