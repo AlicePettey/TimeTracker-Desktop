@@ -1,6 +1,6 @@
 {
   "name": "timetracker-desktop",
-  "version": "1.8.10",
+  "version": "1.8.11",
   "description": "TimeTracker Desktop Companion - System-wide activity tracking",
   "main": "main.js",
   "author": {
@@ -32,7 +32,7 @@
   "dependencies": {
     "active-win": "^8.1.0",
     "electron-log": "^5.1.1",
-    "electron-store": "^8.1.0",
+    "electron-store": "^8.2.0",
     "electron-updater": "^6.1.7",
     "uuid": "^9.0.0"
   },
@@ -83,11 +83,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.png",
@@ -96,7 +100,6 @@
       "signAndEditExecutable": false,
       "sign": null
     },
-
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
@@ -112,11 +115,15 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["universal"]
+          "arch": [
+            "universal"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["universal"]
+          "arch": [
+            "universal"
+          ]
         }
       ],
       "icon": "assets/icon.png",
@@ -130,11 +137,15 @@
       "target": [
         {
           "target": "AppImage",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "deb",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.png",
