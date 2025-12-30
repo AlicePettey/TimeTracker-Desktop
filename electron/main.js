@@ -415,7 +415,7 @@ async function syncActivities() {
     return { success: false, error: 'Sync not configured' };
   }
 
-  const anonKey = process.env.SUPABASE_ANON_KEY || settings.syncAnonKey;
+  const anonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ma3ZiYXVpaXJ4dnJzZ2tpenR6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY5MzUxNTAsImV4cCI6MjA4MjUxMTE1MH0.2H-8kPyZ1GVSBbvF8Ua8if1cdGTQSrTVTZm_PnPROEw';
   if (!anonKey) {
     return { success: false, error: 'Missing Supabase anon key (SUPABASE_ANON_KEY or settings.syncAnonKey)' };
   }
@@ -440,6 +440,7 @@ async function syncActivities() {
       },
       body: JSON.stringify({
         activities: syncQueue.map(a => ({
+          id: a.id || null,
           applicationName: a.applicationName,
           windowTitle: a.windowTitle || '',
           startTime: a.startTime,
