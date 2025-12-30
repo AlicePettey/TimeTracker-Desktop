@@ -58,11 +58,24 @@ function createWindow() {
     }
   });
 
-  // Prevent Electron from opening new windows inside the app.
-  // Instead, open external links in the user's default browser.
+  // ✅ Diagnostics for white-screen issues
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    console.error('DID_FAIL_LOAD', { errorCode, errorDescription, validatedURL });
+  });
+
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    console.error('RENDER_PROCESS_GONE', details);
+  });
+
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    console.log('RENDER_CONSOLE', { level, message, line, sourceId });
+  });
+
+  // ✅ Prevent external navigation inside Electron
   mainWindow.webContents.on('will-navigate', (event, url) => {
-   const current = mainWindow.webContents.getURL();
-   const sameOrigin = (() => {
+    const current = mainWindow.webContents.getURL();
+
+    const sameOrigin = (() => {
       try {
         return new URL(url).origin === new URL(current).origin;
       } catch {
@@ -76,13 +89,13 @@ function createWindow() {
     }
   });
 
+  // ✅ Load renderer
   const isDev = !app.isPackaged;
   if (isDev) {
     const devUrl = process.env.ELECTRON_RENDERER_URL || 'http://localhost:5173';
     mainWindow.loadURL(devUrl);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
-    // adjust if your production path differs
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 
@@ -97,6 +110,7 @@ function createWindow() {
     }
   });
 }
+
 
 function createTray() {
   const iconPath = path.join(__dirname, 'assets', 'tray.png'); // adjust if needed

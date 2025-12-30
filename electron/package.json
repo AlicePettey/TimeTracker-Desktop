@@ -75,7 +75,7 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "timetracker",
+      "owner": "AlicePettey",
       "repo": "timetracker-desktop",
       "releaseType": "release"
     },
@@ -91,7 +91,7 @@
         }
       ],
       "icon": "assets/icon.png",
-      "publisherName": "TimeTracker",
+      "publisherName": "NDS Enterprises LLC",
       "forceCodeSigning": false,
       "signAndEditExecutable": false,
       "sign": null
