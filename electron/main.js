@@ -332,21 +332,6 @@ ipcMain.handle('get-release-url', async () => {
   return null;
 });
 
-ipcMain.handle('check-for-updates', async () => {
-  if (updater && updater.checkForUpdates) return updater.checkForUpdates();
-  return { ok: false, error: 'Updater not configured' };
-});
-
-ipcMain.handle('download-update', async () => {
-  if (updater && updater.downloadUpdate) return updater.downloadUpdate();
-  return { ok: false, error: 'Updater not configured' };
-});
-
-ipcMain.handle('install-update', async () => {
-  if (updater && updater.installUpdate) return updater.installUpdate();
-  return { ok: false, error: 'Updater not configured' };
-});
-
 ipcMain.handle('get-update-status', async () => {
   if (updater && updater.getStatus) return updater.getStatus();
   return { status: 'unknown' };
