@@ -60,20 +60,19 @@ function createWindow() {
 
   // Prevent Electron from opening new windows inside the app.
   // Instead, open external links in the user's default browser.
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (isHttpUrl(url)) {
-      shell.openExternal(url);
-      return { action: 'deny' };
-    }
-    return { action: 'deny' };
-  });
-
-  // Prevent top-level navigation away from your app (common cause of "it opened a web page")
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    // allow local dev URL / file loads, block external http(s)
-    if (isHttpUrl(url)) {
+   const current = mainWindow.webContents.getURL();
+   const sameOrigin = (() => {
+      try {
+        return new URL(url).origin === new URL(current).origin;
+      } catch {
+        return false;
+      }
+    })();
+
+    if (!sameOrigin) {
       event.preventDefault();
-      shell.openExternal(url);
+      if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     }
   });
 
