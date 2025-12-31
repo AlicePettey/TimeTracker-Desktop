@@ -991,6 +991,46 @@
           </div>
         </div>
 
+        <!-- Add after Idle Threshold setting-item -->
+<div class="setting-item">
+  <div>
+    <div class="setting-label">Minimum Activity Duration</div>
+    <div class="setting-description">Seconds before an activity is saved</div>
+  </div>
+  <input type="number" id="min-activity-duration" value="60" min="1" max="3600"
+         style="width: 80px; text-align: center;">
+</div>
+
+<div class="setting-item">
+  <div>
+    <div class="setting-label">Switch Debounce</div>
+    <div class="setting-description">Ignore rapid app switching, seconds</div>
+  </div>
+  <input type="number" id="switch-debounce-seconds" value="7" min="0" max="120"
+         style="width: 80px; text-align: center;">
+</div>
+
+<div class="setting-item" style="align-items: flex-start;">
+  <div style="flex: 1; padding-right: 12px;">
+    <div class="setting-label">Exclude Apps</div>
+    <div class="setting-description">One per line, exact app names</div>
+  </div>
+  <textarea id="exclude-apps" rows="4"
+    style="width: 55%; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); padding: 10px; font-size: 12px; resize: vertical;"
+    placeholder="TimeTracker Desktop&#10;Electron"></textarea>
+</div>
+
+<div class="setting-item" style="align-items: flex-start;">
+  <div style="flex: 1; padding-right: 12px;">
+    <div class="setting-label">Exclude Window Titles</div>
+    <div class="setting-description">One per line, substring match</div>
+  </div>
+  <textarea id="exclude-titles" rows="4"
+    style="width: 55%; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); padding: 10px; font-size: 12px; resize: vertical;"
+    placeholder="Private Browsing&#10;Untitled"></textarea>
+</div>
+
+
         <div class="settings-section">
           <h3>Application</h3>
           <div class="setting-item">
